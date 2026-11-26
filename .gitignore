@@ -10,3 +10,6 @@ venv/
 .workbuddy
 .venv/
 
+# 运行时数据：浏览器登录态（含 Cookie）、缓存、价格库、搜索历史均不提交
+data/
+
