@@ -4,15 +4,11 @@
 
 from __future__ import annotations
 
-import os
-
 import uvicorn
 
-# 代理配置：出口 IP 被平台限流时，设置 SEARCH_PROXY 更换出口。
-# 留空则直连。可用环境变量覆盖：set SEARCH_PROXY=http://127.0.0.1:65202
-_DEFAULT_PROXY = "http://127.0.0.1:65202"
-if not os.getenv("SEARCH_PROXY"):
-    os.environ["SEARCH_PROXY"] = _DEFAULT_PROXY
+# 代理配置：出口 IP 被平台限流时，在启动命令前设置 SEARCH_PROXY 更换出口。
+# 默认直连，不再硬编码固定代理端口（代理软件退出后端口失效会导致所有请求失败）。
+# 例：SEARCH_PROXY=http://127.0.0.1:7890 python run.py
 
 from app.main import app
 
