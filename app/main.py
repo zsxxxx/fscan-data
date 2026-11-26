@@ -17,9 +17,10 @@ from playwright.sync_api import sync_playwright
 
 from .browser import BROWSER_LOCK, launch_context, login_manager
 from .config import DATA_DIR, HISTORY_FILE, PLATFORMS, PLATFORM_MAP, STATIC_DIR
-from .crawlers.base import LoginRequiredError, RateLimitedError
+from .crawlers.base import CaptchaRequiredError, LoginRequiredError, RateLimitedError
 from .crawlers.registry import get_crawler
 from .guard import CooldownActive, rate_guard
+from .proxy_pool import proxy_pool
 from .models import (
     MonitorTaskCreate,
     PlatformStatus,
@@ -288,91 +289,164 @@ def search(req: SearchRequest):
 
     keyword = req.keyword.strip()
     started = time.time()
-
-    # 1) 冷却期内直接拒绝，避免继续请求加重限流
-    remaining = rate_guard.cooldown_remaining(platform.id)
-    if remaining > 0:
-        raise HTTPException(
-            status_code=429,
-            detail=f"{platform.name} 仍处于限流冷却期，请约 {int(remaining)} 秒后再试",
-        )
-
-    # 2) 命中缓存直接返回，不触发真实请求
-    cached = rate_guard.cache_get(platform.id, keyword, req.filters, req.pages)
-    if cached is not None:
-        log.info("命中缓存：%s / %s", platform.name, keyword)
-        return SearchResponse(**cached)
-
-    # 3) 请求节流
-    try:
-        rate_guard.acquire(platform.id)
-    except CooldownActive as exc:
-        raise HTTPException(
-            status_code=429,
-            detail=f"{platform.name} 仍处于限流冷却期，请约 {int(exc.remaining)} 秒后再试",
-        ) from exc
-
-    log.info("开始采集：%s / %s / %s 页 / 条件 %s", platform.name, keyword, req.pages, req.filters)
-    with BROWSER_LOCK:
-        with sync_playwright() as pw:
-            context = launch_context(pw, platform, headless=True)
-            page = context.pages[0] if context.pages else context.new_page()
-            try:
-                products = crawler.crawl(page, keyword, req.pages, req.filters)
-            except LoginRequiredError as exc:
-                raise HTTPException(status_code=401, detail=str(exc)) from exc
-            except RateLimitedError as exc:
-                rate_guard.mark_limited(platform.id)
-                remaining = rate_guard.cooldown_remaining(platform.id)
-                raise HTTPException(
-                    status_code=429,
-                    detail=f"{platform.name} 检测到访问频繁，已被临时限流，请约 {int(remaining / 60) + 1} 分钟后再重试",
-                ) from exc
-            except Exception as exc:  # noqa: BLE001
-                log.exception("采集 %s 失败", platform.id)
-                raise HTTPException(status_code=502, detail=f"采集失败：{exc}") from exc
-            finally:
-                try:
-                    context.close()
-                except Exception:  # noqa: BLE001
-                    pass
-
-    filtered, strict = _apply_filters(products, req, platform)
-    elapsed = round(time.time() - started, 2)
-    message = ""
-    if not products:
-        message = "未采集到商品，请确认已登录并检查平台页面结构是否变化"
-    elif not strict:
-        message = "筛选条件未命中任何商品，已展示未过滤结果"
-
-    _append_history(
+    run_id = uuid.uuid4().hex[:12]
+    status = "running"
+    error = ""
+    product_count = 0
+    stale = False
+    proxy_entry = None
+    proxy_url = ""
+    store.start_run(
         {
+            "id": run_id,
             "platform": platform.id,
-            "platform_name": platform.name,
             "keyword": keyword,
-            "specs": req.specs.strip(),
             "filters": req.filters,
-            "count": len(filtered),
-            "elapsed": elapsed,
-            "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "pages": req.pages,
+            "status": status,
+            "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
     )
 
-    response = SearchResponse(
-        platform=platform.id,
-        platform_name=platform.name,
-        keyword=keyword,
-        specs=req.specs.strip(),
-        products=filtered,
-        total=len(filtered),
-        filtered=strict,
-        message=message,
-        elapsed=elapsed,
-    )
-    if products:
-        rate_guard.mark_success(platform.id)
-        rate_guard.cache_put(platform.id, keyword, req.filters, req.pages, response.model_dump())
-    return response
+    try:
+        # 1) 冷却期：优先返回过期缓存，避免用户拿到 429 空结果
+        remaining = rate_guard.cooldown_remaining(platform.id)
+        if remaining > 0:
+            cached = rate_guard.cache_get_stale(platform.id, keyword, req.filters, req.pages)
+            if cached is not None:
+                status = "stale"
+                stale = True
+                product_count = int(cached.get("total", len(cached.get("products", []))))
+                payload = {**cached, "run_id": run_id, "stale": True}
+                payload["message"] = (
+                    f"平台限流冷却中（约 {int(remaining)} 秒），展示上次缓存结果"
+                )
+                return SearchResponse(**payload)
+            raise HTTPException(
+                status_code=429,
+                detail=f"{platform.name} 仍处于限流冷却期，请约 {int(remaining)} 秒后再试",
+            )
+
+        # 2) 有效缓存直接返回
+        cached = rate_guard.cache_get(platform.id, keyword, req.filters, req.pages)
+        if cached is not None:
+            log.info("命中缓存：%s / %s", platform.name, keyword)
+            rate_guard.cache_hit(platform.id)
+            status = "cache"
+            product_count = int(cached.get("total", len(cached.get("products", []))))
+            return SearchResponse(**{**cached, "run_id": run_id, "stale": False})
+
+        # 3) 自适应节流
+        try:
+            rate_guard.acquire(platform.id)
+        except CooldownActive as exc:
+            raise HTTPException(
+                status_code=429,
+                detail=f"{platform.name} 仍处于限流冷却期，请约 {int(exc.remaining)} 秒后再试",
+            ) from exc
+
+        proxy_entry = proxy_pool.acquire(platform.id)
+        proxy_url = proxy_entry.url if proxy_entry else ""
+        log.info(
+            "开始采集：%s / %s / %s 页 / 条件 %s / 出口 %s",
+            platform.name, keyword, req.pages, req.filters, proxy_url or "直连",
+        )
+        with BROWSER_LOCK:
+            with sync_playwright() as pw:
+                context = launch_context(pw, platform, headless=True, proxy=proxy_url)
+                page = context.pages[0] if context.pages else context.new_page()
+                try:
+                    products = crawler.crawl(page, keyword, req.pages, req.filters, run_id)
+                finally:
+                    try:
+                        context.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+
+        filtered, strict = _apply_filters(products, req, platform)
+        product_count = len(filtered)
+        message = ""
+        if not products:
+            message = "未采集到商品，请确认已登录并检查平台页面结构是否变化"
+        elif not strict:
+            message = "筛选条件未命中任何商品，已展示未过滤结果"
+
+        _append_history(
+            {
+                "platform": platform.id,
+                "platform_name": platform.name,
+                "keyword": keyword,
+                "specs": req.specs.strip(),
+                "filters": req.filters,
+                "count": product_count,
+                "elapsed": round(time.time() - started, 2),
+                "run_id": run_id,
+                "proxy": proxy_url,
+                "stale": False,
+                "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        )
+
+        response = SearchResponse(
+            platform=platform.id,
+            platform_name=platform.name,
+            keyword=keyword,
+            specs=req.specs.strip(),
+            products=filtered,
+            total=product_count,
+            filtered=strict,
+            message=message,
+            elapsed=round(time.time() - started, 2),
+            run_id=run_id,
+        )
+        if products:
+            rate_guard.mark_success(platform.id)
+            if proxy_entry:
+                proxy_pool.mark_success(proxy_entry, platform.id)
+            rate_guard.cache_put(
+                platform.id, keyword, req.filters, req.pages, response.model_dump()
+            )
+        status = "success"
+        return response
+
+    except LoginRequiredError as exc:
+        status = "login_required"
+        error = str(exc)
+        raise HTTPException(status_code=401, detail=error) from exc
+    except CaptchaRequiredError as exc:
+        status = "captcha"
+        error = str(exc)
+        rate_guard.mark_limited(platform.id, seconds=600)
+        if proxy_entry:
+            proxy_pool.mark_failed(proxy_entry, platform.id, seconds=600)
+        raise HTTPException(status_code=428, detail=error) from exc
+    except RateLimitedError as exc:
+        status = "limited"
+        error = str(exc)
+        rate_guard.mark_limited(platform.id)
+        if proxy_entry:
+            proxy_pool.mark_failed(proxy_entry, platform.id)
+        remaining = rate_guard.cooldown_remaining(platform.id)
+        raise HTTPException(
+            status_code=429,
+            detail=f"{platform.name} 检测到访问频繁，已被临时限流，请约 {int(remaining / 60) + 1} 分钟后再重试",
+        ) from exc
+    except HTTPException as exc:
+        status = "error"
+        error = str(exc.detail)
+        raise
+    except Exception as exc:  # noqa: BLE001
+        status = "error"
+        error = str(exc)
+        log.exception("采集 %s 失败", platform.id)
+        if proxy_entry:
+            proxy_pool.mark_failed(proxy_entry, platform.id, seconds=60)
+        raise HTTPException(status_code=502, detail=f"采集失败：{exc}") from exc
+    finally:
+        store.finish_run(
+            run_id, status, product_count, time.time() - started,
+            error=error, proxy=proxy_url, stale=stale,
+        )
 
 
 # ================================================================== 优惠监控 API
@@ -456,6 +530,77 @@ def read_all_alerts():
 def clear_alerts():
     store.clear_alerts()
     return {"ok": True}
+
+
+# ================================================================== 采集诊断与代理池
+
+@app.get("/api/crawl/runs")
+def crawl_runs(limit: int = 50, platform: str | None = None):
+    """采集批次列表（含状态、代理、耗时、错误信息）。"""
+    return {"runs": store.list_runs(limit=limit, platform=platform)}
+
+
+@app.get("/api/crawl/observations")
+def crawl_observations(
+    platform: str | None = None,
+    keyword: str | None = None,
+    sku: str | None = None,
+    run_id: str | None = None,
+    limit: int = 100,
+):
+    """规范化商品观测记录。"""
+    return {
+        "observations": store.list_observations(
+            platform=platform, keyword=keyword, sku=sku, run_id=run_id, limit=limit
+        )
+    }
+
+
+@app.get("/api/crawl/diagnostics")
+def crawl_diagnostics():
+    """限流指标 + 代理健康 + 最近批次，便于定位采集失败原因。"""
+    return {
+        "guard": rate_guard.stats(),
+        "proxies": proxy_pool.status(),
+        "runs": store.list_runs(limit=10),
+    }
+
+
+@app.get("/api/proxies")
+def list_proxies():
+    return {"proxies": proxy_pool.status()}
+
+
+@app.post("/api/proxies")
+def add_proxy(payload: dict):
+    urls = payload.get("urls") or []
+    if isinstance(urls, str):
+        urls = [urls]
+    if not urls and payload.get("url"):
+        urls = [payload["url"]]
+    if not urls:
+        raise HTTPException(status_code=400, detail="请提供 url 或 urls")
+    added = [proxy_pool.add(str(url), str(payload.get("name", ""))) for url in urls]
+    return {"ok": True, "proxies": added}
+
+
+@app.delete("/api/proxies/{proxy_id}")
+def delete_proxy(proxy_id: str):
+    if not proxy_pool.remove(proxy_id):
+        raise HTTPException(status_code=404, detail="代理不存在")
+    return {"ok": True}
+
+
+@app.post("/api/proxies/{proxy_id}/reset")
+def reset_proxy(proxy_id: str):
+    proxy_pool.reset(proxy_id)
+    return {"ok": True}
+
+
+@app.post("/api/proxies/probe")
+def probe_proxies(payload: dict | None = None):
+    proxy_id = (payload or {}).get("id")
+    return {"results": proxy_pool.probe(proxy_id)}
 
 
 @app.get("/api/products/{platform}/{sku}/history")

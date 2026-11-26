@@ -289,7 +289,7 @@
     state.lastResponse = data;
     state.products = data.products || [];
     $('resultCount').textContent = `${data.total} 条`;
-    $('resultMeta').textContent = `${data.keyword || ''} · 耗时 ${data.elapsed}s${data.filtered ? '' : ' · 规格未命中，显示未过滤结果'}`;
+    $('resultMeta').textContent = `${data.keyword || ''} · 耗时 ${data.elapsed}s${data.filtered ? '' : ' · 规格未命中，显示未过滤结果'}${data.stale ? ' · 限流中，展示缓存结果' : ''}${data.run_id ? ` · 批次 ${data.run_id}` : ''}`;
 
     const bar = $('messageBar');
     if (data.message) {
@@ -421,8 +421,51 @@
   function switchView(view) {
     $('searchView').classList.toggle('hidden', view !== 'search');
     $('monitorView').classList.toggle('hidden', view !== 'monitor');
+    $('diagView').classList.toggle('hidden', view !== 'diag');
     document.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('active', b.dataset.view === view));
     if (view === 'monitor') { loadTasks(); loadAlerts(); }
+    if (view === 'diag') { loadDiag(); }
+  }
+
+  async function loadDiag() {
+    try {
+      const data = await api('/api/crawl/diagnostics');
+      const guard = data.guard || {};
+      const parts = Object.entries(guard).map(([k, v]) =>
+        `${k}: 请求${v.requests || 0} / 限流${v.limited || 0} / 缓存${v.cache_hits || 0} / 旧缓存${v.stale_hits || 0} / 冷却${v.cooldown_remaining || 0}s`
+      );
+      $('guardStats').textContent = parts.length ? parts.join('　|　') : '暂无请求记录';
+
+      const proxies = data.proxies || [];
+      const pBody = $('proxyBody');
+      pBody.innerHTML = proxies.length ? proxies.map(p => {
+        const state = p.healthy ? (p.cooldown_remaining > 0 ? '冷却中' : '可用') : '已禁用';
+        return `<tr>
+          <td>${escapeHtml(p.name || p.id)}</td>
+          <td>${escapeHtml(p.ip || '—')}</td>
+          <td>${state}</td>
+          <td>${p.fail_count}</td>
+          <td>${p.cooldown_remaining}s</td>
+          <td><button class="btn btn-ghost" data-proxy-reset="${escapeHtml(p.id)}">重置</button></td>
+        </tr>`;
+      }).join('') : '<tr class="empty-row"><td colspan="6">未配置代理（直连）</td></tr>';
+      pBody.querySelectorAll('[data-proxy-reset]').forEach(b => b.addEventListener('click', async () => {
+        await api(`/api/proxies/${b.dataset.proxyReset}/reset`, { method: 'POST' });
+        loadDiag(); toast('代理已重置', 'success');
+      }));
+
+      const runs = data.runs || [];
+      $('runBody').innerHTML = runs.length ? runs.map(r => `<tr>
+        <td>${escapeHtml(r.id)}</td>
+        <td>${escapeHtml(r.platform)}</td>
+        <td>${escapeHtml(r.keyword)}</td>
+        <td>${escapeHtml(r.status)}</td>
+        <td>${r.product_count}</td>
+        <td>${r.elapsed}s</td>
+        <td>${escapeHtml(r.proxy || '直连')}</td>
+        <td>${escapeHtml(r.started_at)}</td>
+      </tr>`).join('') : '<tr class="empty-row"><td colspan="8">暂无采集记录</td></tr>';
+    } catch (err) { toast(err.message, 'error'); }
   }
 
   async function loadTasks() {
@@ -534,6 +577,11 @@
     // 监控相关
     document.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => switchView(b.dataset.view)));
     $('alertPill').addEventListener('click', () => switchView('monitor'));
+    $('refreshDiagBtn').addEventListener('click', () => loadDiag());
+    $('probeProxiesBtn').addEventListener('click', async () => {
+      await api('/api/proxies/probe', { method: 'POST', body: '{}' });
+      loadDiag(); toast('代理探测完成', 'success');
+    });
     $('addTaskBtn').addEventListener('click', openTaskModal);
     $('taskCancelBtn').addEventListener('click', () => $('taskModal').classList.add('hidden'));
     $('taskSaveBtn').addEventListener('click', saveTask);

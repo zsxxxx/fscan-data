@@ -57,6 +57,7 @@ class Platform:
     home_url: str
     login_url: str
     search_url: str
+    fallback_search_url: str = ""       # 主页面改版/风控时的备用搜索入口
     login_selectors: tuple[str, ...] = ()
     enabled: bool = True
     note: str = ""
@@ -70,7 +71,9 @@ class Platform:
     def profile_dir(self) -> Path:
         return PROFILES_DIR / self.id
 
-    def build_search_url(self, keyword: str, page: int = 1, filters: dict | None = None) -> str:
+    def build_search_url(
+        self, keyword: str, page: int = 1, filters: dict | None = None, url_template: str = ""
+    ) -> str:
         # 分类（取最具体的一级或二级）+ 品牌作为关键词附加词，让平台检索更精准
         extra_terms: list[str] = []
         flt = filters or {}
@@ -86,7 +89,8 @@ class Platform:
         q = keyword
         if extra_terms:
             q = keyword + "%20" + "%20".join(quote(t, safe="") for t in extra_terms)
-        url = self.search_url.format(q=q, page=page)
+        template = url_template or self.search_url
+        url = template.format(q=q, page=page)
         pairs: list[str] = []
         for key, param in self.url_params.items():
             value = flt.get(key)
@@ -289,6 +293,7 @@ PLATFORMS: tuple[Platform, ...] = (
         home_url="https://www.taobao.com",
         login_url="https://login.taobao.com/member/login.jhtml",
         search_url="https://s.taobao.com/search?q={q}",
+        fallback_search_url="https://s.taobao.com/search?q={q}&tab=mall",
         login_selectors=(".site-nav-user", ".site-nav-login-info-nick", "[class*='site-nav-user']"),
         search_fields=(
             PRICE_RANGE_FIELD,
@@ -316,6 +321,7 @@ PLATFORMS: tuple[Platform, ...] = (
         home_url="https://www.jd.com",
         login_url="https://passport.jd.com/uc/login",
         search_url="https://search.jd.com/Search?keyword={q}&enc=utf-8&page={page}",
+        fallback_search_url="https://so.m.jd.com/ware/search.action?keyword={q}",
         login_selectors=("#ttbar-login .nickname", ".nickname", ".user-login", "[class*='user-name']"),
         search_fields=(
             PRICE_RANGE_FIELD,
@@ -426,5 +432,25 @@ PLATFORM_MAP: dict[str, Platform] = {p.id: p for p in PLATFORMS}
 # 例：BROWSER_CHANNEL=msedge 或 BROWSER_CHANNEL=chrome
 BROWSER_CHANNEL: str = os.getenv("BROWSER_CHANNEL", "").strip()
 HEADLESS: bool = os.getenv("BROWSER_HEADLESS", "0") not in ("0", "false", "False")
-# 代理地址，用于限流时更换出口 IP，如 http://127.0.0.1:7890
+# 代理配置：SEARCH_PROXY 单个代理（向后兼容），SEARCH_PROXIES 逗号分隔代理池。
+# 每项可写成 "http://127.0.0.1:7890" 或 "名称=http://127.0.0.1:7890"。
 PROXY: str = os.getenv("SEARCH_PROXY", "").strip()
+
+
+def _parse_proxy_list(raw: str) -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
+    for chunk in raw.split(","):
+        value = chunk.strip()
+        if not value:
+            continue
+        if "=" in value and "://" in value:
+            name, _, url = value.partition("=")
+            out.append((name.strip() or url.strip(), url.strip()))
+        else:
+            out.append((value, value))
+    return out
+
+
+PROXY_LIST: list[tuple[str, str]] = _parse_proxy_list(os.getenv("SEARCH_PROXIES", ""))
+if PROXY and not PROXY_LIST:
+    PROXY_LIST = [("default", PROXY)]

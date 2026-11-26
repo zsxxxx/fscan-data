@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from ..browser import human_pause, human_scroll
 from .base import BaseCrawler
 
 # 新版卡片：data-sku + plugin_goodsCardWrapper
@@ -106,16 +107,15 @@ class JDCrawler(BaseCrawler):
     platform_id = "jd"
 
     def prepare(self, page) -> None:
-        page.wait_for_timeout(4000)
+        human_pause(page, 2500, 4500)
         try:
             page.wait_for_selector(
                 "#J_goodsList li.gl-item, div[data-sku].plugin_goodsCardWrapper",
-                timeout=15000,
+                timeout=12000,
             )
         except Exception:  # noqa: BLE001 - 页面结构变化或反爬时继续尝试解析
             pass
-        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-        page.wait_for_timeout(1500)
+        human_scroll(page, rounds=2)
 
     def extract(self, page) -> list[dict]:
         items = page.evaluate(JD_NEW_ITEMS_JS) or []

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from ..browser import human_pause, human_scroll
 from .base import BaseCrawler, objects_from_json
 
 TAOBAO_ITEMS_JS = r"""() => {
@@ -60,10 +61,8 @@ class TaobaoCrawler(BaseCrawler):
     platform_id = "taobao"
 
     def prepare(self, page) -> None:
-        page.wait_for_timeout(4000)
-        for _ in range(2):
-            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            page.wait_for_timeout(900)
+        human_pause(page, 2500, 4200)
+        human_scroll(page, rounds=2)
 
     def extract(self, page) -> list[dict]:
         items = page.evaluate(TAOBAO_ITEMS_JS) or []
@@ -91,6 +90,7 @@ class TaobaoCrawler(BaseCrawler):
                     "shop": str(obj.get("nick") or obj.get("shop") or ""),
                     "sales": str(obj.get("sales") or obj.get("real_sales") or ""),
                     "specs": str(obj.get("props") or ""),
+                    "source": "json",
                 }
             )
         return out

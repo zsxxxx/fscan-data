@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from ..browser import human_pause, human_scroll
 from .base import BaseCrawler, objects_from_json
 
 # 页面注入数据兜底（与淘宝同一套键名）
@@ -135,16 +136,14 @@ class GenericCrawler(BaseCrawler):
     url_template: str = ""
 
     def prepare(self, page) -> None:
-        page.wait_for_timeout(3500)
+        human_pause(page, 2200, 3800)
         selectors = self.config.get("cardSelectors") or []
         if selectors:
             try:
-                page.wait_for_selector(selectors[0], timeout=12000)
+                page.wait_for_selector(selectors[0], timeout=10000)
             except Exception:  # noqa: BLE001 - 选择器改版时继续走锚点回退
                 pass
-        for _ in range(2):
-            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            page.wait_for_timeout(800)
+        human_scroll(page, rounds=2)
 
     def extract(self, page) -> list[dict]:
         items = page.evaluate(build_items_js(self.config)) or []
@@ -179,6 +178,7 @@ class GenericCrawler(BaseCrawler):
                     "stock": str(obj.get("stock") or ""),
                     "shop": str(obj.get("shop") or obj.get("nick") or obj.get("company") or ""),
                     "sales": str(obj.get("sales") or obj.get("salesTip") or ""),
+                    "source": "json",
                 }
             )
         return out

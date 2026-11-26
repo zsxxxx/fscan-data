@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import random
 import threading
 import time
 from pathlib import Path
@@ -30,10 +31,26 @@ class RateLimitGuard:
     """平台级请求节流 + 限流冷却 + 结果缓存。"""
 
     def __init__(self) -> None:
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._last_request: dict[str, float] = {}
         self._cooldown_until: dict[str, float] = {}
         self._fail_count: dict[str, int] = {}
+        self._stats: dict[str, dict] = {}
+
+    def _interval(self, platform_id: str) -> float:
+        """基础间隔随连续失败次数放大，并加入 ±20% 抖动。"""
+        fail = self._fail_count.get(platform_id, 0)
+        base = MIN_INTERVAL * (1 + min(fail, 4) * 0.4)
+        return base * random.uniform(0.85, 1.2)
+
+    def _bump(self, platform_id: str, key: str, amount: float = 1) -> None:
+        stats = self._stats.setdefault(
+            platform_id, {"requests": 0, "limited": 0, "cache_hits": 0, "stale_hits": 0, "waited": 0.0}
+        )
+        if key == "waited":
+            stats[key] += amount
+        else:
+            stats[key] += int(amount)
 
     # ---------------------------------------------------------- 节流
     def acquire(self, platform_id: str) -> float:
@@ -43,25 +60,28 @@ class RateLimitGuard:
             while True:
                 cooldown_end = self._cooldown_until.get(platform_id, 0)
                 if now < cooldown_end:
-                    wait = cooldown_end - now
-                    raise CooldownActive(platform_id, wait)
+                    raise CooldownActive(platform_id, cooldown_end - now)
 
                 last = self._last_request.get(platform_id, 0)
-                wait = MIN_INTERVAL - (now - last)
+                wait = self._interval(platform_id) - (now - last)
                 if wait <= 0:
                     self._last_request[platform_id] = now
+                    self._bump(platform_id, "requests")
                     return 0.0
                 # 节流的等待在锁内完成，保证全局串行
                 time.sleep(wait)
+                self._bump(platform_id, "waited", wait)
                 now = time.time()
                 cooldown_end = self._cooldown_until.get(platform_id, 0)
                 if now >= cooldown_end:
                     self._last_request[platform_id] = now
+                    self._bump(platform_id, "requests")
                     return wait
 
     def mark_limited(self, platform_id: str, seconds: float = 0) -> None:
         """标记平台进入限流冷却期，连续触发时冷却时间渐进翻倍。"""
         with self._lock:
+            self._bump(platform_id, "limited")
             count = self._fail_count.get(platform_id, 0) + 1
             self._fail_count[platform_id] = count
             if not seconds:
@@ -123,6 +143,39 @@ class RateLimitGuard:
             )
         except Exception:  # noqa: BLE001
             pass
+
+    def cache_get_stale(
+        self, platform_id: str, keyword: str, filters: dict, pages: int
+    ) -> Optional[dict]:
+        """限流期间读取过期缓存，返回 None 表示无历史结果。"""
+        path = CACHE_DIR / f"{self._cache_key(platform_id, keyword, filters, pages)}.json"
+        if not path.exists():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            data = payload.get("data")
+            if data is not None:
+                self._bump(platform_id, "stale_hits")
+            return data
+        except Exception:  # noqa: BLE001
+            return None
+
+    def cache_hit(self, platform_id: str) -> None:
+        with self._lock:
+            self._bump(platform_id, "cache_hits")
+
+    def stats(self) -> dict:
+        """运行指标快照，供诊断接口使用。"""
+        with self._lock:
+            out: dict[str, dict] = {}
+            for platform_id, values in self._stats.items():
+                out[platform_id] = {
+                    **values,
+                    "waited": round(values["waited"], 1),
+                    "cooldown_remaining": int(self.cooldown_remaining(platform_id)),
+                    "fail_count": self._fail_count.get(platform_id, 0),
+                }
+            return out
 
 
 class CooldownActive(Exception):

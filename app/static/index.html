@@ -35,6 +35,10 @@
           <span class="swatch" style="background:#dc2626"></span>
           <span class="name">优惠监控</span>
         </button>
+        <button type="button" class="platform-item" data-view="diag">
+          <span class="swatch" style="background:#0d9488"></span>
+          <span class="name">运行诊断</span>
+        </button>
       </nav>
       <div class="side-foot">
         <div class="side-foot-title">说明</div>
@@ -75,6 +79,40 @@
           </div>
           <div id="alertList" class="alert-list">
             <div class="empty-alert">暂无优惠消息</div>
+          </div>
+        </section>
+      </div>
+
+      <!-- ==================== 运行诊断视图 ==================== -->
+      <div id="diagView" class="hidden">
+        <section class="card">
+          <div class="card-head">
+            <div class="head-left">
+              <h2>采集运行状态</h2>
+              <span class="note">限流指标 / 代理出口 / 最近批次</span>
+            </div>
+            <div class="toolbar">
+              <button id="probeProxiesBtn" class="btn btn-ghost">探测代理</button>
+              <button id="refreshDiagBtn" class="btn btn-ghost">刷新</button>
+            </div>
+          </div>
+          <div id="guardStats" class="hint" style="margin:10px 0">加载中…</div>
+          <div class="table-wrap" style="max-height:260px">
+            <table class="result-table">
+              <thead><tr><th>代理</th><th>出口 IP</th><th>状态</th><th>连续失败</th><th>冷却</th><th>操作</th></tr></thead>
+              <tbody id="proxyBody"><tr class="empty-row"><td colspan="6">未配置代理（直连）</td></tr></tbody>
+            </table>
+          </div>
+        </section>
+        <section class="card">
+          <div class="card-head">
+            <div class="head-left"><h2>最近采集批次</h2></div>
+          </div>
+          <div class="table-wrap" style="max-height:320px">
+            <table class="result-table">
+              <thead><tr><th>批次</th><th>平台</th><th>关键词</th><th>状态</th><th>条数</th><th>耗时</th><th>出口</th><th>开始时间</th></tr></thead>
+              <tbody id="runBody"><tr class="empty-row"><td colspan="8">暂无采集记录</td></tr></tbody>
+            </table>
           </div>
         </section>
       </div>

@@ -21,9 +21,10 @@ from playwright.sync_api import sync_playwright
 from . import store
 from .browser import BROWSER_LOCK, launch_context
 from .config import PLATFORM_MAP
-from .crawlers.base import LoginRequiredError, RateLimitedError
+from .crawlers.base import CaptchaRequiredError, LoginRequiredError, RateLimitedError
 from .crawlers.registry import get_crawler
 from .guard import CooldownActive, rate_guard
+from .proxy_pool import proxy_pool
 
 log = logging.getLogger("app.monitor")
 
@@ -87,6 +88,24 @@ class MonitorEngine:
         task_id = task["id"]
         platform_id = task["platform"]
         platform = PLATFORM_MAP.get(platform_id)
+        run_id = uuid.uuid4().hex[:12]
+        status = "running"
+        error = ""
+        product_count = 0
+        proxy_entry = None
+        proxy_url = ""
+        started = time.time()
+        store.start_run(
+            {
+                "id": run_id,
+                "platform": platform_id,
+                "keyword": task.get("keyword", ""),
+                "filters": task.get("filters", {}),
+                "pages": 1,
+                "status": status,
+                "started_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        )
         try:
             if platform is None or not platform.enabled:
                 raise RuntimeError(f"平台 {platform_id} 不可用")
@@ -97,20 +116,24 @@ class MonitorEngine:
             # 冷却期内跳过
             if rate_guard.cooldown_remaining(platform_id) > 0:
                 log.info("任务 %s 跳过：%s 处于冷却期", task_id, platform.name)
+                status = "skipped"
                 return
 
             try:
                 rate_guard.acquire(platform_id)
             except CooldownActive:
+                status = "skipped"
                 return
 
+            proxy_entry = proxy_pool.acquire(platform_id)
+            proxy_url = proxy_entry.url if proxy_entry else ""
             with BROWSER_LOCK:
                 with sync_playwright() as pw:
-                    context = launch_context(pw, platform, headless=True)
+                    context = launch_context(pw, platform, headless=True, proxy=proxy_url)
                     page = context.pages[0] if context.pages else context.new_page()
                     try:
                         products = crawler.crawl(
-                            page, task["keyword"], 1, task.get("filters", {})
+                            page, task["keyword"], 1, task.get("filters", {}), run_id
                         )
                     finally:
                         try:
@@ -119,6 +142,7 @@ class MonitorEngine:
                             pass
 
             self._analyze(task, products)
+            product_count = len(products)
             store.save_task({
                 **task,
                 "status": "idle",
@@ -127,17 +151,39 @@ class MonitorEngine:
                 "run_count": int(task.get("run_count", 0)) + 1,
             })
             rate_guard.mark_success(platform_id)
+            if proxy_entry:
+                proxy_pool.mark_success(proxy_entry, platform_id)
+            status = "success"
             log.info("监控任务 %s 完成，采集 %d 条", task_id, len(products))
 
         except LoginRequiredError as exc:
-            self._task_error(task, str(exc))
+            status = "login_required"
+            error = str(exc)
+            self._task_error(task, error)
+        except CaptchaRequiredError as exc:
+            status = "captcha"
+            error = str(exc)
+            rate_guard.mark_limited(platform_id, seconds=600)
+            if proxy_entry:
+                proxy_pool.mark_failed(proxy_entry, platform_id, seconds=600)
+            self._task_error(task, error)
         except RateLimitedError as exc:
+            status = "limited"
+            error = str(exc)
             rate_guard.mark_limited(platform_id)
-            self._task_error(task, str(exc))
+            if proxy_entry:
+                proxy_pool.mark_failed(proxy_entry, platform_id)
+            self._task_error(task, error)
         except Exception as exc:  # noqa: BLE001
+            status = "error"
+            error = str(exc)
             log.exception("监控任务 %s 失败", task_id)
-            self._task_error(task, str(exc))
+            self._task_error(task, error)
         finally:
+            store.finish_run(
+                run_id, status, product_count, time.time() - started,
+                error=error, proxy=proxy_url,
+            )
             with self._lock:
                 self._running_tasks.discard(task_id)
 

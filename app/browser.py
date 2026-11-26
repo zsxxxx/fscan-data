@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+import random
 import shutil
 import threading
 import time
@@ -17,42 +18,80 @@ from typing import Optional
 
 from playwright.sync_api import BrowserContext, sync_playwright
 
-from .config import BROWSER_CHANNEL, HEADLESS, PROXY, Platform
+from .config import BROWSER_CHANNEL, HEADLESS, Platform
+from .proxy_pool import proxy_pool
 
 log = logging.getLogger("app.browser")
 
 # 所有 Playwright 操作必须串行，防止同一 profile 被两个进程同时打开
 BROWSER_LOCK = threading.RLock()
 
-USER_AGENT = (
+# 版本与 UA 保持一致，避免 UA/内核版本不匹配触发风控
+USER_AGENTS = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
 )
+VIEWPORTS = ((1366, 900), (1440, 900), (1536, 864), (1920, 1080))
 
 _LAUNCH_ARGS = [
     "--disable-blink-features=AutomationControlled",
     "--disable-dev-shm-usage",
     "--no-first-run",
+    "--disable-features=IsolateOrigins,site-per-process",
 ]
 
+# 仅抹掉最明显的自动化标记，不改平台业务逻辑所需的对象
+_STEALTH_JS = r"""(() => {
+  try {
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    Object.defineProperty(navigator, 'languages', { get: () => ['zh-CN', 'zh', 'en'] });
+    if (!window.chrome) window.chrome = {};
+    if (!window.chrome.runtime) window.chrome.runtime = {};
+    if (!navigator.plugins || navigator.plugins.length === 0) {
+      Object.defineProperty(navigator, 'plugins', {
+        get: () => [
+          { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
+          { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
+        ],
+      });
+    }
+  } catch (e) { /* 某些内核不允许覆盖时静默跳过 */ }
+})();"""
 
-def launch_context(playwright, platform: Platform, headless: bool = True) -> BrowserContext:
+
+def launch_context(
+    playwright,
+    platform: Platform,
+    headless: bool = True,
+    proxy: str = "",
+) -> BrowserContext:
     """用平台专属持久化目录启动浏览器上下文。
 
-    优先使用 BROWSER_CHANNEL 指定的内核；未指定时依次尝试内置 Chromium、
-    系统已安装的 Edge 与 Chrome，避免必须预先下载浏览器内核。
+    proxy 为空时由代理池按平台选取；未配置代理则直连。
+    每次启动使用一致的 UA / 视口 / 语言 / 时区，降低指纹波动。
     """
+    width, height = random.choice(VIEWPORTS)
     kwargs = dict(
         user_data_dir=str(platform.profile_dir()),
         headless=headless,
-        viewport={"width": 1366, "height": 900},
-        user_agent=USER_AGENT,
+        viewport={"width": width, "height": height},
+        user_agent=random.choice(USER_AGENTS),
         args=_LAUNCH_ARGS,
         locale="zh-CN",
+        timezone_id="Asia/Shanghai",
+        color_scheme="light",
     )
     platform.profile_dir().parent.mkdir(parents=True, exist_ok=True)
-    if PROXY:
-        kwargs["proxy"] = {"server": PROXY}
+    selected = proxy
+    if not selected:
+        entry = proxy_pool.acquire(platform.id)
+        selected = entry.url if entry else ""
+    if selected:
+        kwargs["proxy"] = {"server": selected}
 
     channels = [BROWSER_CHANNEL] if BROWSER_CHANNEL else ["", "msedge", "chrome"]
     last_error: Exception | None = None
@@ -61,11 +100,28 @@ def launch_context(playwright, platform: Platform, headless: bool = True) -> Bro
         if channel:
             attempt["channel"] = channel
         try:
-            return playwright.chromium.launch_persistent_context(**attempt)
+            context = playwright.chromium.launch_persistent_context(**attempt)
+            context.add_init_script(_STEALTH_JS)
+            return context
         except Exception as exc:  # noqa: BLE001 - 尝试下一个内核
             last_error = exc
             log.debug("浏览器内核 %s 启动失败：%s", channel or "chromium", exc)
     raise RuntimeError(f"无法启动浏览器内核：{last_error}")
+
+
+def human_pause(page, min_ms: int = 250, max_ms: int = 900) -> None:
+    """类人短暂停顿，避免固定节奏被识别为脚本。"""
+    page.wait_for_timeout(random.randint(min_ms, max_ms))
+
+
+def human_scroll(page, rounds: int = 2) -> None:
+    """分段滚动 + 随机停顿，模拟人工浏览搜索结果。"""
+    for _ in range(rounds):
+        step = random.randint(420, 900)
+        page.mouse.move(random.randint(200, 1100), random.randint(200, 700))
+        page.evaluate(f"window.scrollBy(0, {step})")
+        human_pause(page, 300, 900)
+    human_pause(page, 200, 500)
 
 
 def _detect_logged_in(context: BrowserContext, platform: Platform) -> bool:

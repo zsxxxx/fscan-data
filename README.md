@@ -50,6 +50,36 @@
 
 查询接口：`GET /api/products/{platform}/{sku}/history` 返回价格区间与时间序列。
 
+## 数据结构（v2.2）
+
+采集结果不再只作为一次性列表返回，而是按三层结构落库：
+
+| 层级 | 存储 | 用途 |
+|------|------|------|
+| 采集批次 `crawl_runs` | SQLite | 每次搜索/监控轮询一条，记录关键词、条件、页数、状态、耗时、出口代理、错误 |
+| 商品观测 `product_observations` | SQLite | 一个商品一条，保留标题/价格/促销/店铺/销量等结构化字段与原始解析快照 |
+| 价格历史 `price_history` | SQLite | 供降价/历史低价分析；同 SKU 同价 60 秒内去重 |
+
+关键改进：
+- **SKU 归一化**：优先平台原始 ID，缺失时从商品链接提取，仍缺失则用标题+链接生成稳定指纹。没有 SKU 的商品现在也能进入价格历史和告警分析。
+- **解析来源 `source`**：标记 `dom` / `json`，便于定位是哪条解析通道产出的数据。
+- **批次号 `run_id`**：商品、观测记录、搜索响应、历史记录互相关联，可回溯一次采集的完整链路。
+- 新增「运行诊断」页面与 `/api/crawl/runs`、`/api/crawl/observations`、`/api/crawl/diagnostics` 接口。
+
+## 反爬与限流策略（v2.2）
+
+在原有节流/冷却/缓存基础上升级为体系化防护：
+
+1. **自适应节流**：间隔随连续失败次数放大（8s → 11.2s → 14.4s…），并加入 ±20% 随机抖动；翻页间隔也随机化。
+2. **代理池**：支持 `SEARCH_PROXIES=http://a,名称=http://b` 配置多个出口，按平台粘性选取、失败自动切换、冷却后探测恢复；也可在「运行诊断」页面动态添加/重置/探测。
+3. **旧缓存兜底**：冷却期间不再直接返回 429 空结果；若存在上次成功结果，会标记「限流中，展示缓存结果」返回。
+4. **浏览器指纹一致性**：每次会话使用一致的 UA / 视口 / 语言 / 时区，抹除 `navigator.webdriver` 等明显自动化标记，滚动改为分段 + 随机停顿。
+5. **通道兜底**：主页面解析为空时自动尝试备用入口（如京东移动端）；DOM 与页面 JSON 双通道并行；分类/DOM 改版时可只调整配置。
+6. **验证码分级**：识别滑块/图形验证码时返回 HTTP 428，并进入长冷却；这类验证需要人工介入，重试无法解决。
+7. **登录态健康检查**：结果页出现「请登录」时直接提示提前登录，不把空结果误判为无商品。
+
+> 注意：平台 IP 级风控无法仅靠本地策略完全绕过。代理池解决的是「有可用干净出口时自动切换与恢复」，若所有出口都被封，仍需更换网络出口或等待。
+
 ## 安装与启动
 
 ```bash
@@ -87,7 +117,10 @@ app/
   main.py               FastAPI 路由与搜索流程
   config.py             平台注册表、路径与浏览器配置
   models.py             API 数据模型
-  browser.py            Playwright 持久化登录、状态检测、登录任务
+  browser.py            Playwright 登录态 / 指纹一致性 / 类人滚动
+  guard.py              自适应节流 / 渐进冷却 / 缓存与旧缓存兜底
+  proxy_pool.py         代理池：轮换、粘性、健康检查与失败剔除
+  store.py              SQLite：价格历史 / 告警 / 任务 / 采集批次 / 观测
   crawlers/
     base.py             采集器基类与清洗/过滤工具
     jd.py               京东适配器
@@ -124,6 +157,13 @@ run.py                  本地启动入口
 | DELETE | `/api/monitor/alerts` | 清空告警 |
 | GET | `/api/products/{platform}/{sku}/history` | 商品价格历史 |
 | GET | `/api/promo-zones/{platform}` | 平台优惠专区入口 |
+| GET | `/api/crawl/runs` | 采集批次列表 |
+| GET | `/api/crawl/observations` | 规范化商品观测 |
+| GET | `/api/crawl/diagnostics` | 限流指标 + 代理健康 + 最近批次 |
+| GET/POST | `/api/proxies` | 查看 / 添加代理 |
+| DELETE | `/api/proxies/{id}` | 删除代理 |
+| POST | `/api/proxies/{id}/reset` | 重置代理失败状态 |
+| POST | `/api/proxies/probe` | 探测代理出口 IP |
 
 搜索请求示例：
 
@@ -171,11 +211,16 @@ run.py                  本地启动入口
 - **换出口 IP**（已验证有效）：在**启动命令前**设置代理环境变量后重启：
 
   ```bash
-  # Windows Git Bash / PowerShell
-  SEARCH_PROXY=http://127.0.0.1:65202 python run.py
+  # 单个代理
+  SEARCH_PROXY=http://127.0.0.1:7890 python run.py
+
+  # 代理池（逗号分隔，可带名称）
+  SEARCH_PROXIES=" Homes=http://127.0.0.1:7890, Office=http://127.0.0.1:7891 " python run.py
   ```
 
-  > 注意：代理必须在**进程启动前**通过命令行前缀设置。因为 `config.py` 在 import 时读取 `SEARCH_PROXY`，在 `run.py` 内部再 `os.environ` 赋值不会生效。
+  也可以在「运行诊断」页面直接添加代理，无需重启服务。
+
+  > 注意：环境变量必须在**进程启动前**设置，因为 `config.py` 在 import 时读取。
   > 换代理出口后，京东会要求**重新扫码登录**（登录 cookie 绑定原 IP/账号）。可运行 `python login_jd_proxy.py` 弹出有头浏览器扫码，登录态存到 `data/profiles/jd_proxy_login`，验证通过后可替换 `data/profiles/jd` 供采集复用。
 
 - **手动解除**：确认限流已过时 `POST /api/platforms/{id}/cooldown/reset`。

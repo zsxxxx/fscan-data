@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
+import random
 import re
 from typing import Any, Iterable
 from urllib.parse import quote, urljoin
 
+from ..browser import human_pause, human_scroll
 from ..config import Platform
 from ..models import Product
 from .. import store
@@ -49,6 +52,10 @@ class RateLimitedError(Exception):
     """平台触发访问频率限制。"""
 
 
+class CaptchaRequiredError(Exception):
+    """平台要求人工验证码/滑块验证。"""
+
+
 def clean_text(value: Any) -> str:
     if not value:
         return ""
@@ -76,6 +83,28 @@ def abs_url(href: Any, base: str = "") -> str:
     if value.startswith("//"):
         return "https:" + value
     return urljoin(base, value) if base else value
+
+
+def normalize_sku(sku: Any, url: str = "", title: str = "") -> str:
+    """统一 SKU：优先平台原始 ID，其次从链接提取，最后用内容指纹兜底。
+
+    没有 SKU 的商品此前不会写价格历史，导致历史价/优惠分析缺失。
+    """
+    value = clean_text(sku)
+    if value:
+        return value
+    for pattern in (
+        r"[?&](?:goods_id|goodsId|offerId|item_id|itemId|id)=(\d{4,})",
+        r"/(\d{6,})(?:[./?#]|$)",
+        r"(\d{8,})",
+    ):
+        match = re.search(pattern, url or "")
+        if match:
+            return match.group(1)
+    seed = f"{title}|{url}".strip("|")
+    if seed:
+        return "fp_" + hashlib.md5(seed.encode("utf-8")).hexdigest()[:12]
+    return ""
 
 
 def looks_like_product(obj: dict) -> bool:
@@ -133,21 +162,25 @@ class BaseCrawler:
     def __init__(self, platform: Platform):
         self.platform = platform
 
-    def build_url(self, keyword: str, page: int = 1, filters: dict | None = None) -> str:
-        return self.platform.build_search_url(quote(keyword), page, filters)
+    def build_url(
+        self, keyword: str, page: int = 1, filters: dict | None = None, url_template: str = ""
+    ) -> str:
+        return self.platform.build_search_url(quote(keyword), page, filters, url_template)
 
     def prepare(self, page) -> None:
         """页面加载后的等待/滚动逻辑。"""
-        page.wait_for_timeout(2500)
+        human_pause(page, 1600, 3000)
+        human_scroll(page, rounds=1)
 
     def extract(self, page) -> list[dict]:
         """从当前页面提取原始商品字典。"""
         return []
 
-    def to_product(self, raw: dict, keyword: str, rank: int) -> Product:
+    def to_product(self, raw: dict, keyword: str, rank: int, run_id: str = "") -> Product:
         display, value = parse_price(raw.get("price", ""))
         title = clean_text(raw.get("title", ""))
-        sku = clean_text(raw.get("sku", ""))
+        url = abs_url(raw.get("url", ""))
+        sku = normalize_sku(raw.get("sku", ""), url, title)
         promo_label = clean_text(raw.get("promo_label", ""))
         promo_text = f"{promo_label} {clean_text(raw.get('promo', ''))}"
 
@@ -214,10 +247,10 @@ class BaseCrawler:
                 promo_price=promo_price,
                 stock=stock_text,
                 promo_label=promo_label,
-                url=abs_url(raw.get("url", "")),
+                url=url,
             )
 
-        return Product(
+        product = Product(
             platform=self.platform.id,
             platform_name=self.platform.name,
             rank=rank,
@@ -240,11 +273,44 @@ class BaseCrawler:
             is_free_trial="0元试用" in promo_text or "免费试用" in promo_text,
             is_free_buy="0元购" in promo_text or "零元购" in promo_text,
             image=abs_url(raw.get("image", "")),
-            url=abs_url(raw.get("url", "")),
+            url=url,
             shop=clean_text(raw.get("shop", "")),
             specs=clean_text(raw.get("specs", "")),
             keyword=keyword,
+            run_id=run_id,
+            source=clean_text(raw.get("source", "")) or "dom",
         )
+
+        # 规范化观测落库：保留结构化字段 + 原始解析快照，便于回溯解析规则
+        try:
+            store.record_observation(
+                {
+                    "run_id": run_id,
+                    "platform": self.platform.id,
+                    "sku": sku,
+                    "title": title,
+                    "url": url,
+                    "image": product.image,
+                    "shop": product.shop,
+                    "price": value,
+                    "promo_price": promo_price,
+                    "list_price": list_price,
+                    "sales": product.sales,
+                    "stock": stock_text,
+                    "promo_type": promo_type,
+                    "promo_label": promo_label,
+                    "coupon": coupon,
+                    "keyword": keyword,
+                    "rank": rank,
+                    "source": product.source,
+                    "captured_at": product.crawled_at,
+                    "raw": raw,
+                }
+            )
+        except Exception:  # noqa: BLE001 - 诊断数据写入失败不影响采集主流程
+            pass
+
+        return product
 
     @staticmethod
     def _login_required(page) -> bool:
@@ -265,35 +331,80 @@ class BaseCrawler:
         return "亲，请登录" in body or "请先登录" in body
 
     @staticmethod
-    def _rate_limited(page) -> bool:
-        """识别平台访问频繁/验证码拦截。"""
+    def _captcha_required(page) -> bool:
+        """识别滑块/图形验证码页面（需要人工介入，不能靠重试解决）。"""
+        url = (page.url or "").lower()
+        if "risk_handler" in url or "verify" in url and "jd.com" in url:
+            return True
         try:
             body = page.locator("body").inner_text(timeout=3000) or ""
         except Exception:  # noqa: BLE001
             return False
-        return any(
-            marker in body
-            for marker in ("访问频繁", "无法搜索，请稍后", "请输入验证码", "滑块验证")
-        )
+        return any(marker in body for marker in ("请输入验证码", "滑块验证", "安全验证", "拖动滑块"))
 
-    def crawl(self, page, keyword: str, pages: int = 1, filters: dict | None = None) -> list[Product]:
+    @staticmethod
+    def _rate_limited(page) -> bool:
+        """识别平台访问频繁拦截。"""
+        try:
+            body = page.locator("body").inner_text(timeout=3000) or ""
+        except Exception:  # noqa: BLE001
+            return False
+        return any(marker in body for marker in ("访问频繁", "无法搜索，请稍后", "搜索过于频繁"))
+
+    def crawl(
+        self,
+        page,
+        keyword: str,
+        pages: int = 1,
+        filters: dict | None = None,
+        run_id: str = "",
+    ) -> list[Product]:
         products: list[Product] = []
+        fallback_used = False
         for page_no in range(1, pages + 1):
             if page_no > 1:
-                page.wait_for_timeout(3000)  # 翻页间隔，降低触发限流概率
-            page.goto(self.build_url(keyword, page_no, filters), wait_until="domcontentloaded", timeout=60000)
+                page.wait_for_timeout(random.randint(2200, 4200))  # 抖动翻页间隔
+            url = self.build_url(keyword, page_no, filters)
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
             self.prepare(page)
             if self._login_required(page):
                 raise LoginRequiredError(
                     f"{self.platform.name} 需要登录才能查看搜索结果，请先点击「提前登录」"
                 )
+            if self._captcha_required(page):
+                raise CaptchaRequiredError(
+                    f"{self.platform.name} 要求人工验证码验证，请在浏览器中完成验证后重试"
+                )
             if self._rate_limited(page):
                 raise RateLimitedError(
                     f"{self.platform.name} 检测到访问频繁，已被临时限流，请稍等几分钟再重试"
                 )
+
             raw_items = self.extract(page)
+            # 主入口解析为空时尝试备用入口（如 JD 移动端），仍为空再进入下一页
+            if (
+                not raw_items
+                and page_no == 1
+                and self.platform.fallback_search_url
+                and not fallback_used
+            ):
+                fallback_used = True
+                page.goto(
+                    self.build_url(keyword, page_no, filters, self.platform.fallback_search_url),
+                    wait_until="domcontentloaded",
+                    timeout=60000,
+                )
+                self.prepare(page)
+                if self._login_required(page):
+                    raise LoginRequiredError(f"{self.platform.name} 备用入口需要登录")
+                if self._captcha_required(page):
+                    raise CaptchaRequiredError(f"{self.platform.name} 备用入口要求人工验证")
+                if not self._rate_limited(page):
+                    raw_items = self.extract(page)
+
             for raw in raw_items:
-                product = self.to_product(raw, keyword, len(products) + 1)
+                raw.setdefault("source", "json" if raw.get("from_json") else "dom")
+                product = self.to_product(raw, keyword, len(products) + 1, run_id)
                 if product.title:
                     products.append(product)
         return dedupe(products)
