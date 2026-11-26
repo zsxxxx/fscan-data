@@ -267,36 +267,99 @@
     }
   }
 
+  let loginFrameTimer = null;
+
+  function clearLoginFrameTimer() {
+    if (loginFrameTimer) {
+      clearTimeout(loginFrameTimer);
+      loginFrameTimer = null;
+    }
+  }
+
+  function showLoginLoading(message) {
+    clearLoginFrameTimer();
+    $('loginLoading').classList.remove('hidden');
+    $('loginFrame').classList.add('hidden');
+    $('loginFallback').classList.add('hidden');
+    if (message) $('loginModalMsg').textContent = message;
+  }
+
+  function showLoginFallback(message) {
+    clearLoginFrameTimer();
+    $('loginLoading').classList.add('hidden');
+    $('loginFrame').classList.add('hidden');
+    $('loginFallback').classList.remove('hidden');
+    $('loginModalMsg').textContent = message || '登录页无法在当前页面显示，请在新标签打开';
+  }
+
+  function handleLoginFrameLoad() {
+    clearLoginFrameTimer();
+    let hasContent = false;
+    try {
+      const doc = $('loginFrame').contentDocument;
+      hasContent = !!doc && !!doc.body && (doc.body.innerText || '').trim().length > 0;
+    } catch (err) { hasContent = false; }
+    if (hasContent) {
+      $('loginLoading').classList.add('hidden');
+      $('loginFallback').classList.add('hidden');
+      $('loginFrame').classList.remove('hidden');
+      $('loginModalMsg').textContent = '登录页已显示，请在下方完成登录';
+    } else {
+      showLoginFallback();
+    }
+  }
+
   async function startLogin() {
     const platform = state.platformMap[state.selected];
     stopLoginPoll();
     $('loginModalTitle').textContent = `登录${platform.name}`;
-    $('loginModalMsg').textContent = '登录页已嵌入当前页面，请在下方完成登录。';
-    $('loginFrame').src = platform.login_url || platform.home_url;
+    showLoginLoading('正在加载平台登录页，请稍候…');
+    const frame = $('loginFrame');
+    frame.onload = handleLoginFrameLoad;
+    frame.src = platform.login_url || platform.home_url;
     $('loginModal').classList.remove('hidden');
+    loginFrameTimer = setTimeout(() => showLoginFallback(), 8000);
     setBadge('wait', '登录中');
     setNavStatus(platform.id, 'wait');
   }
 
+  function retryInlineLogin() {
+    const platform = state.platformMap[state.selected];
+    showLoginLoading('正在重新加载登录页…');
+    const frame = $('loginFrame');
+    const url = platform.login_url || platform.home_url;
+    const sep = url.includes('?') ? '&' : '?';
+    frame.src = `${url}${sep}_retry=${Date.now()}`;
+    loginFrameTimer = setTimeout(() => showLoginFallback(), 8000);
+  }
+
   async function cancelLogin() {
+    clearLoginFrameTimer();
     $('loginFrame').src = 'about:blank';
     $('loginModal').classList.add('hidden');
     refreshStatus(true);
   }
 
   async function markLoginDone() {
-    $('loginModalMsg').textContent = '正在检测登录状态…';
+    const doneBtn = $('loginDoneBtn');
+    const cancelBtn = $('loginCancelBtn');
+    doneBtn.disabled = true;
+    cancelBtn.disabled = true;
+    $('loginModalMsg').textContent = '正在检测采集器登录态，请稍候（约 30 秒）…';
     try {
       const status = await refreshStatus(true);
       $('loginFrame').src = 'about:blank';
-      $('loginModal').classList.add('hidden');
       if (status.logged_in) {
+        $('loginModal').classList.add('hidden');
         toast('登录状态已保存', 'success');
       } else {
-        toast('当前浏览器登录态与采集器不互通，请改用采集浏览器登录或导入 Cookie', 'error');
+        showLoginFallback('未检测到采集器登录态：当前浏览器登录与采集器不互通');
       }
     } catch (err) {
       $('loginModalMsg').textContent = err.message;
+    } finally {
+      doneBtn.disabled = false;
+      cancelBtn.disabled = false;
     }
   }
 
@@ -603,6 +666,7 @@
     $('loginCancelBtn').addEventListener('click', cancelLogin);
     $('loginDoneBtn').addEventListener('click', markLoginDone);
     $('loginOpenTabBtn').addEventListener('click', openLoginInTab);
+    $('loginRetryBtn').addEventListener('click', retryInlineLogin);
     $('searchForm').addEventListener('submit', doSearch);
     $('exportBtn').addEventListener('click', exportCsv);
     $('clearBtn').addEventListener('click', clearResults);

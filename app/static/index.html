@@ -213,12 +213,22 @@
   <div id="loginModal" class="overlay hidden">
     <div class="modal login-modal">
       <h3 id="loginModalTitle">登录淘宝</h3>
-      <p id="loginModalMsg">登录页已嵌入当前页面，请在下方完成登录。</p>
-      <iframe id="loginFrame" class="login-frame" title="平台登录页"></iframe>
-      <div class="modal-tip">
-        页面被平台拒绝嵌入时，可
-        <button id="loginOpenTabBtn" class="link-btn" type="button">在当前浏览器新标签打开</button>。
-        注意：此处登录的 Cookie 属于当前浏览器，采集器使用独立登录态，完成后仍需点击「我已完成登录」检测。
+      <p id="loginModalMsg">正在加载登录页…</p>
+      <div class="login-stage">
+        <div id="loginLoading" class="login-state">
+          <span class="login-spinner"></span>
+          <span>正在加载平台登录页，请稍候…</span>
+        </div>
+        <iframe id="loginFrame" class="login-frame hidden" title="平台登录页"></iframe>
+        <div id="loginFallback" class="login-state hidden">
+          <div class="login-fallback-title">登录页无法在当前页面显示</div>
+          <p>平台限制了页面嵌入。请在当前浏览器新标签打开登录页，完成登录后再回到这里点击「我已完成登录」。</p>
+          <div class="login-fallback-actions">
+            <button id="loginOpenTabBtn" class="btn btn-primary" type="button">在当前浏览器打开登录页</button>
+            <button id="loginRetryBtn" class="btn btn-ghost" type="button">重试页面内显示</button>
+          </div>
+          <div class="hint">注意：当前浏览器登录的 Cookie 与采集器独立登录态不互通，检测不到时请通过采集浏览器登录或导入 Cookie。</div>
+        </div>
       </div>
       <div class="modal-actions">
         <button id="loginCancelBtn" class="btn btn-ghost">取消</button>
