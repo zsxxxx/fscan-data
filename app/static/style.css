@@ -151,6 +151,9 @@ body {
 /* 平台专属条件直接参与外层 form-grid 布局 */
 .platform-fields { display: contents; }
 .field input::placeholder { color: #aab1bd; }
+.price-custom { display: flex; align-items: center; gap: 6px; }
+.price-custom input { flex: 1; min-width: 0; }
+.price-sep { color: var(--muted); font-size: 12px; flex: none; }
 .form-actions { grid-column: span 4; display: flex; justify-content: flex-end; }
 
 /* 两级联动分类下拉 */

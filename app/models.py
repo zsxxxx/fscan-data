@@ -16,7 +16,7 @@ class SearchRequest(BaseModel):
     max_price: Optional[float] = Field(None, ge=0, description="最高价（兼容旧调用）")
     filters: dict[str, str] = Field(default_factory=dict, description="平台专属搜索条件")
     pages: int = Field(1, ge=1, description="抓取页数（不设上限）")
-    max_results: int = Field(0, ge=0, description="最多返回条数，0 表示不限制")
+    max_results: int = Field(100, ge=0, description="最多返回条数，默认 100，0 表示不限制")
 
 
 class Product(BaseModel):

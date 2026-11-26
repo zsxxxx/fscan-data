@@ -108,12 +108,36 @@
           </div></div>`;
       }
 
+      // 价格区间：内置区间 + 自定义起止价
+      if (f.key === 'price_range') {
+        const options = (f.options || []).map((o) =>
+          `<option value="${escapeHtml(o.value)}"${o.value === f.default ? ' selected' : ''}>${escapeHtml(o.label)}</option>`
+        ).join('');
+        return `<div class="field"><span>${label}</span>
+          <select data-filter="price_range">${options}</select>
+          <div class="price-custom hidden">
+            <input id="priceMin" type="number" min="0" step="0.01" placeholder="最低价">
+            <span class="price-sep">—</span>
+            <input id="priceMax" type="number" min="0" step="0.01" placeholder="最高价">
+          </div>
+        </div>`;
+      }
+
       // 单选下拉
       const options = (f.options || []).map((o) =>
         `<option value="${escapeHtml(o.value)}"${o.value === f.default ? ' selected' : ''}>${escapeHtml(o.label)}</option>`
       ).join('');
       return `<label class="field"><span>${label}</span><select data-filter="${key}">${options}</select></label>`;
     }).join('');
+
+    // 自定义价格区间：选中时才显示起止价输入
+    const priceSelect = container.querySelector('[data-filter="price_range"]');
+    if (priceSelect) {
+      const box = container.querySelector('.price-custom');
+      const toggle = () => box.classList.toggle('hidden', priceSelect.value !== 'custom');
+      priceSelect.addEventListener('change', toggle);
+      toggle();
+    }
 
     // 两级联动：一级变化时重建二级选项
     container.querySelectorAll('.cascade').forEach((box) => {
@@ -165,6 +189,16 @@
         return;
       }
       const value = (el.value || '').trim();
+      if (el.dataset.filter === 'price_range' && value === 'custom') {
+        const min = ($('priceMin').value || '').trim();
+        const max = ($('priceMax').value || '').trim();
+        if (min && max && Number(min) > Number(max)) {
+          toast('自定义价格区间：最低价不能大于最高价', 'error');
+          return null;
+        }
+        if (min || max) filters.price_range = `${min}-${max}`;
+        return;
+      }
       if (value !== '') filters[el.dataset.filter] = value;
     });
     return filters;
@@ -394,6 +428,7 @@
       pages: Number($('pages').value) || 1,
       max_results: $('maxResults').value === '' ? 0 : Number($('maxResults').value),
     };
+    if (!payload.filters) return;
 
     $('searchBtn').disabled = true;
     showLoading(true, `正在采集 ${platform.name} 的商品数据…`);
