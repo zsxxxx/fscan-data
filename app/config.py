@@ -138,6 +138,7 @@ PRICE_RANGE_FIELD = SearchField(
         ("3000-5000", "¥3000 - ¥5000"),
         ("5000-10000", "¥5000 - ¥10000"),
         ("10000-", "¥10000 以上"),
+        ("custom", "自定义价格区间"),
     ),
 )
 SORT_DEFAULT = (
@@ -147,11 +148,99 @@ SORT_DEFAULT = (
     ("price_desc", "价格从高到低"),
 )
 
-BRAND_OPTIONS = (
-    ("苹果", "苹果"), ("华为", "华为"), ("小米", "小米"), ("荣耀", "荣耀"),
-    ("联想", "联想"), ("ThinkPad", "ThinkPad"), ("戴尔", "戴尔"), ("惠普", "惠普"),
-    ("华硕", "华硕"), ("机械革命", "机械革命"), ("罗技", "罗技"), ("雷柏", "雷柏"),
-    ("耐克", "耐克"), ("阿迪达斯", "阿迪达斯"), ("李宁", "李宁"), ("雅诗兰黛", "雅诗兰黛"),
+def _brand_pairs(*names: str) -> tuple[tuple[str, str], ...]:
+    """品牌去重并保持顺序，供下拉多选使用。"""
+    return tuple((name, name) for name in dict.fromkeys(names))
+
+
+# 覆盖数码、电脑、家电、美妆、服饰、食品、母婴、家居、汽车、图书等常见品牌。
+# 品牌是开放集合，后续可继续向此列表补充；前端下拉支持滚动勾选。
+BRAND_OPTIONS = _brand_pairs(
+    # 手机 / 数码 / 影音
+    "苹果", "Apple", "华为", "Huawei", "小米", "Xiaomi", "红米", "Redmi", "荣耀", "Honor",
+    "OPPO", "vivo", "一加", "OnePlus", "realme", "魅族", "Meizu", "中兴", "ZTE", "努比亚",
+    "nubia", "三星", "Samsung", "诺基亚", "Nokia", "摩托罗拉", "Motorola", "谷歌", "Google",
+    "索尼", "Sony", "佳能", "Canon", "尼康", "Nikon", "富士", "Fujifilm", "松下", "Panasonic",
+    "大疆", "DJI", "漫步者", "Edifier", "Bose", "JBL", "森海塞尔", "Sennheiser", "铁三角",
+    "Audio-Technica", "Beats", "华为FreeBuds", "AirPods", "Apple Watch", "小米手环",
+    # 电脑 / 办公 / 外设
+    "联想", "Lenovo", "ThinkPad", "戴尔", "Dell", "惠普", "HP", "华硕", "ASUS", "宏碁", "Acer",
+    "神舟", "Hasee", "机械革命", "Mechrevo", "雷蛇", "Razer", "微软", "Microsoft", "罗技",
+    "Logitech", "雷柏", "Rapoo", "双飞燕", "A4Tech", "LG", "飞利浦", "Philips", "明基", "BenQ",
+    "爱普生", "Epson", "兄弟", "Brother", "方正", "清华同方", "长城", "浪潮", "华为MateBook",
+    "荣耀MagicBook", "红米RedmiBook", "华硕ROG", "微星", "MSI", "技嘉", "Gigabyte", "七彩虹",
+    "影驰", "索泰", "蓝宝石", "迪兰", "海盗船", "Corsair", "金士顿", "Kingston", "芝奇",
+    "G.Skill", "西部数据", "WD", "希捷", "Seagate", "三星SSD", "长江存储", "致态", "铠侠",
+    # 家电 / 厨电 / 生活电器
+    "海尔", "Haier", "美的", "Midea", "格力", "Gree", "海信", "Hisense", "TCL", "长虹",
+    "Changhong", "创维", "Skyworth", "康佳", "Konka", "西门子", "Siemens", "博世", "Bosch",
+    "夏普", "Sharp", "戴森", "Dyson", "云米", "Viomi", "方太", "Fotile", "老板", "Robam",
+    "华帝", "Vatti", "帅康", "樱花", "九阳", "Joyoung", "苏泊尔", "Supor", "格兰仕", "Galanz",
+    "欧姆龙", "Omron", "科沃斯", "Ecovacs", "石头", "Roborock", "添可", "Tineco", "小熊",
+    "德尔玛", "北鼎", "膳魔师", "象印", "虎牌", "松下家电", "米家", "智米", "云鲸", "追觅",
+    "Dreame", "莱克", "小狗吸尘器", "飞利浦家电", "夏普家电",
+    # 美妆 / 个护 / 洗护
+    "欧莱雅", "L'Oreal", "雅诗兰黛", "Estee Lauder", "兰蔻", "Lancome", "资生堂", "Shiseido",
+    "SK-II", "海蓝之谜", "La Mer", "赫莲娜", "HR", "迪奥", "Dior", "香奈儿", "Chanel",
+    "圣罗兰", "YSL", "阿玛尼", "Armani", "珀莱雅", "自然堂", "百雀羚", "薇诺娜", "完美日记",
+    "花西子", "毛戈平", "高夫", "妮维雅", "Nivea", "曼秀雷敦", "多芬", "Dove", "潘婷",
+    "Pantene", "海飞丝", "Head & Shoulders", "清扬", "Clear", "沙宣", "Sassoon", "云南白药",
+    "高露洁", "Colgate", "佳洁士", "Crest", "舒适达", "Sensodyne", "李施德林", "Listerine",
+    "欧舒丹", "L'Occitane", "祖玛珑", "Jo Malone", "宝格丽", "Bvlgari", "古驰", "Gucci",
+    "普拉达", "Prada", "爱马仕", "Hermes", "巴黎世家", "Balenciaga", "纪梵希", "Givenchy",
+    "范思哲", "Versace", "杜嘉班纳", "DOLCE&GABBANA", "Tom Ford", "TF", "阿玛尼美妆",
+    "MAC", "魅可", "NARS", "丝芙兰", "Sephora", "屈臣氏", "名创优品", "MINISO",
+    # 服饰 / 鞋包 / 箱包
+    "耐克", "Nike", "阿迪达斯", "Adidas", "新百伦", "New Balance", "安踏", "Anta", "李宁",
+    "Li-Ning", "特步", "Xtep", "匹克", "Peak", "361度", "乔丹", "中国乔丹", "斐乐", "FILA",
+    "彪马", "Puma", "匡威", "Converse", "万斯", "Vans", "亚瑟士", "ASICS", "斯凯奇",
+    "Skechers", "哥伦比亚", "Columbia", "北面", "The North Face", "始祖鸟", "Arc'teryx",
+    "迪卡侬", "Decathlon", "优衣库", "Uniqlo", "海澜之家", "HLA", "太平鸟", "Peacebird",
+    "波司登", "Bosideng", "雅戈尔", "Youngor", "七匹狼", "劲霸", "柒牌", "罗蒙", "报喜鸟",
+    "森马", "Semir", "美特斯邦威", "Metersbonwe", "以纯", "真维斯", "班尼路", "卡宾", "GXG",
+    "杰克琼斯", "Jack & Jones", "ONLY", "VERO MODA", "艾格", "拉夏贝尔", "歌莉娅", "欧时力",
+    "茵曼", "裂帛", "韩都衣舍", "三彩", "秋水伊人", "百丽", "Belle", "他她", "Tata", "天美意",
+    "思加图", "星期六", "达芙妮", "骆驼", "Camel", "木林森", "红蜻蜓", "奥康", "意尔康",
+    "金利来", "Goldlion", "皮尔卡丹", "Pierre Cardin", "梦特娇", "路易威登", "LV", "巴宝莉",
+    "Burberry", "蔻驰", "Coach", "迈克科尔斯", "Michael Kors", "Tory Burch", "菲拉格慕",
+    "Ferragamo", "卡地亚", "Cartier", "劳力士", "Rolex", "欧米茄", "Omega", "浪琴",
+    "Longines", "天梭", "Tissot", "西铁城", "Citizen", "卡西欧", "Casio", "精工", "Seiko",
+    "新秀丽", "Samsonite", "外交官", "Diplomat", "海关", "小米箱包",
+    # 食品 / 生鲜 / 酒水
+    "三只松鼠", "百草味", "良品铺子", "洽洽", "卫龙", "海底捞", "蒙牛", "伊利", "光明",
+    "三元", "雀巢", "Nestle", "达能", "Danone", "可口可乐", "Coca-Cola", "百事可乐",
+    "Pepsi", "农夫山泉", "娃哈哈", "康师傅", "统一", "今麦郎", "五粮液", "茅台", "泸州老窖",
+    "剑南春", "洋河", "汾酒", "青岛啤酒", "雪花啤酒", "燕京啤酒", "金龙鱼", "福临门",
+    "鲁花", "海天", "李锦记", "太太乐", "好丽友", "Orion", "亿滋", "Mondelez", "玛氏",
+    "Mars", "德芙", "士力架", "Snickers", "费列罗", "Ferrero", "好时", "Hershey's", "乐事",
+    "Lay's", "品客", "Pringles", "旺旺", "徐福记", "阿尔卑斯", "曼妥思", "Mentos", "绿箭",
+    "益达", "麦德龙", "山姆", "Costco", "盒马", "永辉", "大润发", "家家悦", "胖东来",
+    # 母婴 / 玩具 / 乐器
+    "帮宝适", "Pampers", "好奇", "Huggies", "花王", "Kao", "尤妮佳", "Unicharm", "美赞臣",
+    "Enfamil", "雅培", "Abbott", "惠氏", "Wyeth", "飞鹤", "金领冠", "君乐宝", "合生元",
+    "澳优", "a2", "爱他美", "Aptamil", "诺优能", "美素佳儿", "Friso", "佳贝艾特", "Kabrita",
+    "巴布豆", "巴拉巴拉", "Balabala", "安踏儿童", "李宁儿童", "耐克儿童", "阿迪达斯儿童",
+    "乐高", "LEGO", "美泰", "Mattel", "孩之宝", "Hasbro", "迪士尼", "Disney", "三丽鸥",
+    "Sanrio", "万代", "Bandai", "奥迪双钻", "布鲁可", "费雪", "Fisher-Price", "澳贝",
+    "好孩子", "Goodbaby", "小龙哈彼", "贝亲", "Pigeon", "新安怡", "Avent", "美德乐",
+    "Medela", "雅马哈", "Yamaha", "卡西欧乐器", "珠江钢琴", "星海钢琴", "罗兰", "Roland",
+    # 家居 / 建材 / 灯饰
+    "宜家", "IKEA", "顾家家居", "全友家居", "欧派", "OPPEIN", "索菲亚", "尚品宅配", "志邦",
+    "金牌厨柜", "好莱客", "皮阿诺", "大自然", "圣象", "生活家", "欧普照明", "Opple",
+    "雷士照明", "NVC", "公牛", "BULL", "正泰", "CHINT", "德力西", "Delixi", "施耐德",
+    "Schneider", "罗格朗", "Legrand", "汉斯格雅", "Hansgrohe", "科勒", "Kohler", "TOTO",
+    "恒洁", "箭牌", "九牧", "JOMOO", "惠达", "东鹏", "马可波罗", "诺贝尔", "冠珠",
+    "蒙娜丽莎", "欧神诺", "多乐士", "立邦", "三棵树", "晨光", "得力", "齐心", "广博",
+    # 汽车 / 出行
+    "米其林", "Michelin", "马牌", "Continental", "邓禄普", "Dunlop", "固特异", "Goodyear",
+    "倍耐力", "Pirelli", "普利司通", "Bridgestone", "韩泰", "Hankook", "锦湖", "Kumho",
+    "壳牌", "Shell", "美孚", "Mobil", "嘉实多", "Castrol", "3M", "龟牌", "Turtle Wax",
+    "化学小子", "固特威", "车仆", "途虎", "法雷奥", "Valeo", "德尔福", "Delphi", "盖茨",
+    "Gates", "舍弗勒", "Schaeffler", "比亚迪", "特斯拉", "Tesla", "蔚来", "理想", "小鹏",
+    # 图书 / 文娱
+    "商务印书馆", "中华书局", "人民文学出版社", "中信出版社", "机械工业出版社",
+    "电子工业出版社", "清华大学出版社", "北京大学出版社", "三联书店", "上海译文出版社",
+    "译林出版社", "作家出版社", "新东方", "得到", "樊登读书",
 )
 
 # ---- 京东：参照京东搜索页左侧真实分类树 ----
@@ -301,7 +390,7 @@ PLATFORMS: tuple[Platform, ...] = (
             SearchField("sort", "排序方式", "select", options=SORT_DEFAULT),
             SearchField("shop_type", "店铺类型", "select", options=(
                 ("", "全部店铺"), ("mall", "天猫"), ("t", "淘宝集市"))),
-            SearchField("brand", "热门品牌（下拉多选）", "multiselect", options=BRAND_OPTIONS),
+            SearchField("brand", "品牌", "multiselect", options=BRAND_OPTIONS),
             SearchField("service", "服务特色（下拉多选）", "multiselect", options=(
                 ("包邮", "包邮"), ("天猫", "天猫"), ("新品", "新品"), ("二手", "二手"), ("同城", "同城"))),
         ),
@@ -331,7 +420,7 @@ PLATFORMS: tuple[Platform, ...] = (
                 ("sort_asc", "价格从低到高"), ("sort_desc", "价格从高到低"))),
             SearchField("channel", "配送 / 店铺", "select", options=(
                 ("", "全部"), ("self", "京东自营"), ("logistics", "京东物流"))),
-            SearchField("brand", "热门品牌（下拉多选）", "multiselect", options=BRAND_OPTIONS),
+            SearchField("brand", "品牌", "multiselect", options=BRAND_OPTIONS),
             SearchField("service", "服务特色（下拉多选）", "multiselect", options=(
                 ("自营", "自营"), ("京东物流", "京东物流"), ("新品", "新品"),
                 ("秒杀", "秒杀"), ("优惠券", "优惠券"), ("试用", "试用"))),
@@ -362,7 +451,7 @@ PLATFORMS: tuple[Platform, ...] = (
             SearchField("location", "发货地", "select", options=(
                 ("", "不限"), ("浙江", "浙江"), ("广东", "广东"), ("江苏", "江苏"),
                 ("山东", "山东"), ("福建", "福建"), ("上海", "上海"), ("北京", "北京"))),
-            SearchField("brand", "热门品牌（下拉多选）", "multiselect", options=BRAND_OPTIONS),
+            SearchField("brand", "品牌", "multiselect", options=BRAND_OPTIONS),
         ),
         url_params={"sort": "sort", "subsidy": "activity_type"},
         promo_zones=(
@@ -385,7 +474,7 @@ PLATFORMS: tuple[Platform, ...] = (
             SearchField("sort", "排序方式", "select", options=SORT_DEFAULT),
             SearchField("source", "商品来源", "select", options=(
                 ("", "全部"), ("live", "直播商品"), ("video", "短视频商品"))),
-            SearchField("brand", "热门品牌（下拉多选）", "multiselect", options=BRAND_OPTIONS),
+            SearchField("brand", "品牌", "multiselect", options=BRAND_OPTIONS),
         ),
         url_params={"sort": "sort_type", "source": "source"},
         promo_zones=(
@@ -413,9 +502,7 @@ PLATFORMS: tuple[Platform, ...] = (
                 ("", "全部"), ("factory", "源头工厂"), ("strong", "实力商家"))),
             SearchField("one_piece", "代发方式", "select", options=(
                 ("", "全部"), ("yes", "支持一件代发"))),
-            SearchField("brand", "供应商 / 品牌（下拉多选）", "multiselect", options=(
-                ("源头工厂", "源头工厂"), ("实力商家", "实力商家"), ("超级工厂", "超级工厂"),
-                ("品牌代工", "品牌代工"), ("一件代发", "一件代发"))),
+            SearchField("brand", "品牌", "multiselect", options=BRAND_OPTIONS),
         ),
         url_params={"moq": "min_order", "sort": "sortType", "supplier": "supplierType", "one_piece": "isMixed"},
         promo_zones=(
