@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>商品数据扫描 · 多平台商品采集</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">DS</span>
+      <div>
+        <h1>商品数据扫描</h1>
+        <p>多平台商品规格与链接采集</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <span class="pill" id="alertPill" style="cursor:pointer" title="查看优惠告警"><span class="dot"></span><span id="alertCount">0 条优惠</span></span>
+      <span class="pill" id="servicePill"><span class="dot"></span>服务检测中</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="side-title">接入平台</div>
+      <nav id="platformNav" class="platform-nav"></nav>
+      <div class="side-title" style="margin-top:18px">功能区</div>
+      <nav class="platform-nav">
+        <button type="button" class="platform-item active" data-view="search">
+          <span class="swatch" style="background:#2563eb"></span>
+          <span class="name">商品搜索</span>
+        </button>
+        <button type="button" class="platform-item" data-view="monitor">
+          <span class="swatch" style="background:#dc2626"></span>
+          <span class="name">优惠监控</span>
+        </button>
+      </nav>
+      <div class="side-foot">
+        <div class="side-foot-title">说明</div>
+        <p>登录态保存在本机独立浏览器配置中，只需提前登录一次。</p>
+      </div>
+    </aside>
+
+    <main class="content">
+      <!-- ==================== 优惠监控视图 ==================== -->
+      <div id="monitorView" class="hidden">
+        <section class="card">
+          <div class="card-head">
+            <div class="head-left">
+              <h2>智能优惠监控</h2>
+              <span class="note">自动盯降价 / 促销 / 优惠券 / 0元购</span>
+            </div>
+            <button id="addTaskBtn" class="btn btn-primary">+ 新建监控任务</button>
+          </div>
+          <div class="table-wrap" style="max-height:280px">
+            <table class="result-table">
+              <thead><tr>
+                <th>平台</th><th>关键词</th><th>间隔</th><th>状态</th><th>运行次数</th><th>上次运行</th><th>操作</th>
+              </tr></thead>
+              <tbody id="taskBody"><tr class="empty-row"><td colspan="7">暂无监控任务</td></tr></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-head">
+            <div class="head-left">
+              <h2>优惠告警消息 <span id="alertBadge" class="count">0 条</span></h2>
+            </div>
+            <div class="toolbar">
+              <button id="readAllBtn" class="btn btn-ghost">全部已读</button>
+              <button id="clearAlertsBtn" class="btn btn-ghost danger">清空</button>
+            </div>
+          </div>
+          <div id="alertList" class="alert-list">
+            <div class="empty-alert">暂无优惠消息</div>
+          </div>
+        </section>
+      </div>
+
+      <!-- ==================== 商品搜索视图 ==================== -->
+      <div id="searchView">
+      <section class="card">
+        <div class="card-head">
+          <div class="head-left">
+            <h2 id="platformTitle">平台</h2>
+            <span id="loginBadge" class="badge badge-idle">未检测</span>
+          </div>
+          <span id="platformNote" class="note"></span>
+        </div>
+        <div class="login-row">
+          <button id="loginBtn" class="btn btn-primary">提前登录</button>
+          <button id="refreshLoginBtn" class="btn btn-ghost">刷新登录态</button>
+          <button id="clearLoginBtn" class="btn btn-ghost danger">清除登录态</button>
+          <span id="loginDetail" class="hint">登录后可采集需要登录才能看到的商品数据。</span>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <div class="head-left">
+            <h2>商品搜索</h2>
+            <span id="searchConditionNote" class="note"></span>
+          </div>
+        </div>
+        <form id="searchForm" class="form-grid">
+          <label class="field field-wide">
+            <span>搜索关键词</span>
+            <input id="keyword" name="keyword" required placeholder="例如：连衣裙 女 夏季">
+          </label>
+          <label class="field field-wide">
+            <span>规格 / 要求（本地筛选）</span>
+            <input id="specs" name="specs" placeholder="例如：黑色 M码 纯棉；多个词需全部命中">
+          </label>
+          <div id="platformFields" class="platform-fields"></div>
+          <label class="field">
+            <span>抓取页数</span>
+            <input id="pages" name="pages" type="number" min="1" value="1" placeholder="不限页数">
+          </label>
+          <label class="field">
+            <span>最大条数</span>
+            <input id="maxResults" name="maxResults" type="number" min="0" value="0" placeholder="0=不限">
+          </label>
+          <div class="form-actions">
+            <button type="submit" id="searchBtn" class="btn btn-primary">搜索商品</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="card result-card">
+        <div class="card-head">
+          <div class="head-left">
+            <h2>数据列表 <span id="resultCount" class="count">0 条</span></h2>
+            <span id="resultMeta" class="note"></span>
+          </div>
+          <div class="toolbar">
+            <button id="exportBtn" class="btn btn-ghost">导出 CSV</button>
+            <button id="clearBtn" class="btn btn-ghost">清空</button>
+          </div>
+        </div>
+        <div id="messageBar" class="message-bar hidden"></div>
+        <div class="table-wrap">
+          <table class="result-table data-table">
+            <thead>
+              <tr>
+                <th class="col-index">#</th>
+                <th class="col-platform">平台</th>
+                <th class="col-title">商品标题</th>
+                <th class="col-price">当前价</th>
+                <th class="col-promo">优惠后价</th>
+                <th class="col-discount">优惠金额</th>
+                <th class="col-history">历史低价</th>
+                <th class="col-stock">库存</th>
+                <th class="col-promo">优惠类型</th>
+                <th class="col-shop">店铺</th>
+                <th class="col-sales">销量</th>
+                <th class="col-link">商品链接</th>
+              </tr>
+            </thead>
+            <tbody id="resultBody">
+              <tr class="empty-row"><td colspan="12">暂无数据，请先搜索商品</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      </div><!-- /searchView -->
+    </main>
+  </div>
+
+  <div id="loading" class="overlay hidden">
+    <div class="loading-box"><span class="spinner"></span><span id="loadingText">采集中…</span></div>
+  </div>
+
+  <div id="loginModal" class="overlay hidden">
+    <div class="modal">
+      <h3 id="loginModalTitle">登录淘宝</h3>
+      <p id="loginModalMsg">正在打开浏览器…</p>
+      <div class="modal-tip">请在弹出的浏览器窗口中扫码或输入账号密码完成登录，系统会自动检测登录状态。</div>
+      <div class="modal-actions">
+        <button id="loginCancelBtn" class="btn btn-ghost">取消</button>
+        <button id="loginDoneBtn" class="btn btn-primary">我已完成登录</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="taskModal" class="overlay hidden">
+    <div class="modal" style="width:min(520px,92vw)">
+      <h3>新建监控任务</h3>
+      <div class="form-grid" style="grid-template-columns:repeat(2,1fr);margin-top:12px">
+        <label class="field field-wide"><span>平台</span><select id="taskPlatform"></select></label>
+        <label class="field field-wide"><span>监控关键词</span><input id="taskKeyword" placeholder="例如： Mechanical 键盘"></label>
+        <label class="field"><span>轮询间隔（秒）</span><input id="taskInterval" type="number" min="60" value="300"></label>
+        <label class="field"><span>规格/要求</span><input id="taskSpecs" placeholder="可选"></label>
+      </div>
+      <div class="modal-tip" style="margin-top:12px">任务启动后后台自动轮询，发现降价/促销/优惠券/0元购会生成告警消息。间隔建议 ≥300 秒以避免平台限流。</div>
+      <div class="modal-actions">
+        <button id="taskCancelBtn" class="btn btn-ghost">取消</button>
+        <button id="taskSaveBtn" class="btn btn-primary">创建任务</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

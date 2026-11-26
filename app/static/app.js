@@ -1,0 +1,570 @@
+/* 商品数据扫描 · 前端交互 */
+(function () {
+  'use strict';
+
+  const $ = (id) => document.getElementById(id);
+  const state = {
+    platforms: [],
+    platformMap: {},
+    selected: '',
+    products: [],
+    lastResponse: null,
+    loginPoll: null,
+  };
+
+  function escapeHtml(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function safeUrl(value) {
+    const url = String(value || '');
+    return /^https?:\/\//i.test(url) ? url : '';
+  }
+
+  async function api(path, options) {
+    const resp = await fetch(path, options);
+    let data;
+    try { data = await resp.json(); } catch (e) { data = {}; }
+    if (!resp.ok) {
+      const detail = data.detail || data.message || `请求失败 (${resp.status})`;
+      throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+    }
+    return data;
+  }
+
+  let toastTimer = null;
+  function toast(message, type) {
+    const el = $('toast');
+    el.textContent = message;
+    el.className = 'toast' + (type ? ' ' + type : '');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.add('hidden'), 3600);
+  }
+
+  function showLoading(show, text) {
+    $('loadingText').textContent = text || '采集中…';
+    $('loading').classList.toggle('hidden', !show);
+  }
+
+  function setBadge(status, text) {
+    const map = { ok: 'badge-ok', no: 'badge-no', wait: 'badge-wait', idle: 'badge-idle' };
+    const badge = $('loginBadge');
+    badge.className = 'badge ' + (map[status] || map.idle);
+    badge.textContent = text;
+  }
+
+  function setNavStatus(platformId, status) {
+    const dot = document.querySelector(`[data-nav="${platformId}"] .status-dot`);
+    if (!dot) return;
+    dot.className = 'status-dot' + (status === 'ok' ? ' on' : status === 'wait' ? ' wait' : '');
+  }
+
+  function renderNav() {
+    const nav = $('platformNav');
+    nav.innerHTML = state.platforms.map((p) => `
+      <button type="button" class="platform-item${p.id === state.selected ? ' active' : ''}${p.enabled ? '' : ' disabled'}"
+              data-nav="${escapeHtml(p.id)}" title="${escapeHtml(p.note || p.name)}">
+        <span class="swatch" style="background:${escapeHtml(p.color)}"></span>
+        <span class="name">${escapeHtml(p.name)}</span>
+        <span class="status-dot"></span>
+      </button>`).join('');
+    nav.querySelectorAll('.platform-item').forEach((btn) => {
+      btn.addEventListener('click', () => selectPlatform(btn.dataset.nav));
+    });
+  }
+
+  function renderPlatformFields(platform) {
+    const container = $('platformFields');
+    const fields = platform.search_fields || [];
+    $('searchConditionNote').textContent = fields.length
+      ? `${platform.name}专属条件已加载（${fields.length} 项）`
+      : '';
+    container.innerHTML = fields.map((f) => {
+      const key = escapeHtml(f.key);
+      const label = escapeHtml(f.label);
+
+      // 两级联动分类：一级 select + 二级 select（按一级动态填充）
+      if (f.type === 'cascade') {
+        const first = (f.options || []).map((o) =>
+          `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`
+        ).join('');
+        return `<div class="field"><span>${label}</span><div class="cascade" data-key="${key}">
+          <select class="cascade-l1" data-filter="${key}">${first}</select>
+          <select class="cascade-l2" data-filter="${key}_sub"><option value="">全部子类</option></select>
+        </div></div>`;
+      }
+
+      // 下拉多选：点击展开勾选面板，全部选择式
+      if (f.type === 'multiselect') {
+        const items = (f.options || []).map((o) =>
+          `<label class="ms-item"><input type="checkbox" value="${escapeHtml(o.value)}"><span>${escapeHtml(o.label)}</span></label>`
+        ).join('');
+        return `<div class="field"><span>${label}</span>
+          <div class="ms" data-filter="${key}">
+            <button type="button" class="ms-trigger"><span class="ms-text">不限</span><span class="ms-caret">▾</span></button>
+            <div class="ms-panel">${items}</div>
+          </div></div>`;
+      }
+
+      // 单选下拉
+      const options = (f.options || []).map((o) =>
+        `<option value="${escapeHtml(o.value)}"${o.value === f.default ? ' selected' : ''}>${escapeHtml(o.label)}</option>`
+      ).join('');
+      return `<label class="field"><span>${label}</span><select data-filter="${key}">${options}</select></label>`;
+    }).join('');
+
+    // 两级联动：一级变化时重建二级选项
+    container.querySelectorAll('.cascade').forEach((box) => {
+      const key = box.dataset.key;
+      const l1 = box.querySelector('.cascade-l1');
+      const l2 = box.querySelector('.cascade-l2');
+      const meta = (platform.search_fields || []).find((f) => f.key === key);
+      const map = (meta && meta.cascade) || {};
+      const fill = () => {
+        const subs = map[l1.value] || [];
+        l2.innerHTML = [ '<option value="">全部子类</option>' ].concat(
+          subs.map((o) => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`)
+        ).join('');
+      };
+      l1.addEventListener('change', fill);
+      fill();
+    });
+
+    // 下拉多选：展开/收起、勾选回显、点击外部关闭
+    container.querySelectorAll('.ms').forEach((ms) => {
+      const trigger = ms.querySelector('.ms-trigger');
+      const text = ms.querySelector('.ms-text');
+      trigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const willOpen = !ms.classList.contains('open');
+        container.querySelectorAll('.ms.open').forEach((x) => x.classList.remove('open'));
+        if (willOpen) ms.classList.add('open');
+      });
+      ms.querySelectorAll('input[type=checkbox]').forEach((cb) => {
+        cb.addEventListener('change', () => {
+          const selected = Array.from(ms.querySelectorAll('input:checked')).map((c) => c.value);
+          text.textContent = selected.length ? `已选 ${selected.length} 项` : '不限';
+        });
+      });
+      ms.addEventListener('click', (e) => e.stopPropagation());
+    });
+    document.addEventListener('click', () => {
+      container.querySelectorAll('.ms.open').forEach((x) => x.classList.remove('open'));
+    });
+  }
+
+  function collectFilters() {
+    const filters = {};
+    document.querySelectorAll('#platformFields [data-filter]').forEach((el) => {
+      // 下拉多选
+      if (el.classList.contains('ms')) {
+        const selected = Array.from(el.querySelectorAll('input:checked')).map((c) => c.value);
+        if (selected.length) filters[el.dataset.filter] = selected.join(',');
+        return;
+      }
+      const value = (el.value || '').trim();
+      if (value !== '') filters[el.dataset.filter] = value;
+    });
+    return filters;
+  }
+
+  function selectPlatform(id) {
+    state.selected = id;
+    const platform = state.platformMap[id];
+    $('platformTitle').textContent = platform.name;
+    $('platformNote').textContent = platform.note || '';
+    $('keyword').placeholder = `例如：在${platform.name}搜索的商品名称`;
+    $('searchBtn').disabled = !platform.enabled;
+    $('loginModalTitle').textContent = `登录${platform.name}`;
+    renderPlatformFields(platform);
+    renderNav();
+    setBadge('idle', '未检测');
+    $('loginDetail').textContent = '正在检测登录态…';
+    refreshStatus(false).catch((err) => {
+      $('loginDetail').textContent = err.message;
+      setBadge('no', '检测失败');
+    });
+  }
+
+  async function refreshStatus(force) {
+    const status = await api(`/api/platforms/${encodeURIComponent(state.selected)}/status?force=${force ? 1 : 0}`);
+    if (status.logged_in) {
+      setBadge('ok', '已登录');
+      setNavStatus(status.id, 'ok');
+    } else {
+      setBadge('no', '未登录');
+      setNavStatus(status.id, '');
+    }
+    $('loginDetail').textContent = status.detail || '';
+    const task = status.login_task || {};
+    if (task.status === 'running') {
+      setBadge('wait', '登录中');
+      setNavStatus(status.id, 'wait');
+    }
+    return status;
+  }
+
+  function stopLoginPoll() {
+    if (state.loginPoll) {
+      clearInterval(state.loginPoll);
+      state.loginPoll = null;
+    }
+  }
+
+  async function pollLoginTask() {
+    try {
+      const task = await api(`/api/platforms/${encodeURIComponent(state.selected)}/login-task`);
+      $('loginModalMsg').textContent = task.message || '正在等待登录…';
+      if (task.status === 'success') {
+        stopLoginPoll();
+        $('loginModal').classList.add('hidden');
+        toast(`${state.platformMap[state.selected].name} 登录成功`, 'success');
+        refreshStatus(true);
+      } else if (['failed', 'timeout', 'cancelled'].includes(task.status)) {
+        stopLoginPoll();
+        $('loginModal').classList.add('hidden');
+        toast(task.message || '登录未完成', task.status === 'cancelled' ? '' : 'error');
+        refreshStatus(true);
+      }
+    } catch (err) {
+      $('loginModalMsg').textContent = err.message;
+    }
+  }
+
+  async function startLogin() {
+    const platform = state.platformMap[state.selected];
+    try {
+      const task = await api(`/api/platforms/${encodeURIComponent(platform.id)}/login`, { method: 'POST' });
+      $('loginModalMsg').textContent = task.message || '正在打开浏览器…';
+      $('loginModal').classList.remove('hidden');
+      setBadge('wait', '登录中');
+      setNavStatus(platform.id, 'wait');
+      stopLoginPoll();
+      state.loginPoll = setInterval(pollLoginTask, 2000);
+      pollLoginTask();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  }
+
+  async function cancelLogin() {
+    try {
+      await api(`/api/platforms/${encodeURIComponent(state.selected)}/login/cancel`, { method: 'POST' });
+    } catch (err) { /* 忽略取消失败 */ }
+    stopLoginPoll();
+    $('loginModal').classList.add('hidden');
+    refreshStatus(true);
+  }
+
+  async function markLoginDone() {
+    $('loginModalMsg').textContent = '正在检测登录状态…';
+    try {
+      const status = await refreshStatus(true);
+      if (status.logged_in) {
+        stopLoginPoll();
+        $('loginModal').classList.add('hidden');
+        toast('登录状态已保存', 'success');
+      } else {
+        $('loginModalMsg').textContent = '未检测到登录态，请在浏览器中完成登录后再试。';
+      }
+    } catch (err) {
+      $('loginModalMsg').textContent = err.message;
+    }
+  }
+
+  async function clearLogin() {
+    if (!confirm(`确定清除 ${state.platformMap[state.selected].name} 的登录态吗？下次需要重新扫码登录。`)) return;
+    try {
+      await api(`/api/platforms/${encodeURIComponent(state.selected)}/login`, { method: 'DELETE' });
+      toast('登录态已清除', 'success');
+      refreshStatus(true);
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  }
+
+  function renderResults(data) {
+    state.lastResponse = data;
+    state.products = data.products || [];
+    $('resultCount').textContent = `${data.total} 条`;
+    $('resultMeta').textContent = `${data.keyword || ''} · 耗时 ${data.elapsed}s${data.filtered ? '' : ' · 规格未命中，显示未过滤结果'}`;
+
+    const bar = $('messageBar');
+    if (data.message) {
+      bar.textContent = data.message;
+      bar.classList.remove('hidden');
+    } else {
+      bar.classList.add('hidden');
+    }
+
+    const body = $('resultBody');
+    if (!state.products.length) {
+      body.innerHTML = '<tr class="empty-row"><td colspan="12">未采集到商品数据</td></tr>';
+      return;
+    }
+    const fmt = (v) => v == null ? '—' : `¥${Number(v).toFixed(2)}`;
+    body.innerHTML = state.products.map((p, i) => {
+      const link = safeUrl(p.url);
+      const cell = (value, width) => `<td title="${escapeHtml(value)}"${width ? ` style="max-width:${width}px"` : ''}>${escapeHtml(value) || '<span style="color:#9ca3af">—</span>'}</td>`;
+      const promoPrice = p.promo_price != null
+        ? `<span class="price-current">¥${Number(p.promo_price).toFixed(2)}</span>`
+        : '<span style="color:#9ca3af">—</span>';
+      const discount = p.discount_amount != null && p.discount_amount > 0
+        ? `<span class="price-down">-¥${Number(p.discount_amount).toFixed(2)}</span>`
+        : '<span style="color:#9ca3af">—</span>';
+      const low = p.history_low != null ? fmt(p.history_low) : '—';
+      const stock = p.stock || (p.stock_count != null ? String(p.stock_count) : '—');
+      let promoTag = '—';
+      if (p.promo_type) {
+        const cls = p.promo_type.includes('0元') ? 'free' : p.promo_type === '优惠券' ? 'coupon' : '';
+        promoTag = `<span class="promo-tag ${cls}" title="${escapeHtml(p.promo_label || p.promo_type)}">${escapeHtml(p.promo_type)}</span>`;
+      }
+      return `<tr>
+        <td class="col-index">${i + 1}</td>
+        ${cell(p.platform_name)}
+        ${cell(p.title, 300)}
+        <td class="price">${p.list_price != null ? `<span class="price-strike">¥${Number(p.list_price).toFixed(2)}</span><br>` : ''}${escapeHtml(p.price) || '—'}</td>
+        <td>${promoPrice}</td>
+        <td>${discount}</td>
+        <td>${low}</td>
+        ${cell(stock, 90)}
+        <td>${promoTag}</td>
+        ${cell(p.shop, 120)}
+        ${cell(p.sales, 90)}
+        <td>${link ? `<a href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">查看商品 ↗</a>` : '—'}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  function clearResults() {
+    state.products = [];
+    state.lastResponse = null;
+    $('resultBody').innerHTML = '<tr class="empty-row"><td colspan="12">暂无数据，请先搜索商品</td></tr>';
+    $('resultCount').textContent = '0 条';
+    $('resultMeta').textContent = '';
+    $('messageBar').classList.add('hidden');
+  }
+
+  function csvField(value) {
+    const text = String(value == null ? '' : value);
+    return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  }
+
+  function exportCsv() {
+    if (!state.products.length) {
+      toast('暂无数据可导出');
+      return;
+    }
+    const header = ['序号', '平台', '商品标题', '当前价', '划线价', '优惠后价', '优惠金额', '历史低价', '库存', '优惠类型', '优惠标签', '店铺', '销量', '商品链接', '关键词', '采集时间'];
+    const rows = state.products.map((p, i) => [
+      i + 1, p.platform_name, p.title, p.price, p.list_price ?? '', p.promo_price ?? '',
+      p.discount_amount ?? '', p.history_low ?? '', p.stock, p.promo_type, p.promo_label,
+      p.shop, p.sales, p.url, p.keyword, p.crawled_at,
+    ]);
+    const csv = '\ufeff' + [header, ...rows].map((row) => row.map(csvField).join(',')).join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    const ts = new Date().toISOString().slice(0, 10);
+    a.download = `商品数据_${state.selected}_${ts}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+    toast('CSV 已导出', 'success');
+  }
+
+  async function doSearch(event) {
+    event.preventDefault();
+    const platform = state.platformMap[state.selected];
+    if (!platform.enabled) {
+      toast(`${platform.name} 适配器开发中，暂不支持采集`, 'error');
+      return;
+    }
+    const keyword = $('keyword').value.trim();
+    if (!keyword) { toast('请输入搜索关键词', 'error'); return; }
+
+    const payload = {
+      platform: state.selected,
+      keyword,
+      specs: $('specs').value.trim(),
+      filters: collectFilters(),
+      pages: Number($('pages').value) || 1,
+      max_results: $('maxResults').value === '' ? 0 : Number($('maxResults').value),
+    };
+
+    $('searchBtn').disabled = true;
+    showLoading(true, `正在采集 ${platform.name} 的商品数据…`);
+    try {
+      const data = await api('/api/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      renderResults(data);
+      toast(`采集完成，共 ${data.total} 条`, 'success');
+    } catch (err) {
+      $('messageBar').textContent = err.message;
+      $('messageBar').classList.remove('hidden');
+      toast(err.message, 'error');
+    } finally {
+      showLoading(false);
+      $('searchBtn').disabled = !platform.enabled;
+    }
+  }
+
+  // -------------------------------------------------------------- 优惠监控
+  let alertPoll = null;
+
+  function switchView(view) {
+    $('searchView').classList.toggle('hidden', view !== 'search');
+    $('monitorView').classList.toggle('hidden', view !== 'monitor');
+    document.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+    if (view === 'monitor') { loadTasks(); loadAlerts(); }
+  }
+
+  async function loadTasks() {
+    try {
+      const data = await api('/api/monitor/tasks');
+      const tasks = data.tasks || [];
+      const body = $('taskBody');
+      if (!tasks.length) {
+        body.innerHTML = '<tr class="empty-row"><td colspan="7">暂无监控任务</td></tr>';
+        return;
+      }
+      body.innerHTML = tasks.map(t => {
+        const statusCls = t.status === 'error' ? 'badge-no' : t.enabled ? 'badge-ok' : 'badge-idle';
+        const statusText = !t.enabled ? '已暂停' : t.status === 'error' ? '异常' : '运行中';
+        return `<tr>
+          <td>${escapeHtml(t.platform_name || t.platform)}</td>
+          <td>${escapeHtml(t.keyword)}</td>
+          <td>${t.interval}s</td>
+          <td><span class="badge ${statusCls}">${statusText}</span>${t.last_error ? `<div class="hint" title="${escapeHtml(t.last_error)}">${escapeHtml(t.last_error.slice(0,20))}</div>` : ''}</td>
+          <td>${t.run_count}</td>
+          <td>${escapeHtml(t.last_run_at || '—')}</td>
+          <td>
+            <button class="btn btn-ghost" data-toggle="${escapeHtml(t.id)}">${t.enabled ? '暂停' : '启动'}</button>
+            <button class="btn btn-ghost danger" data-del="${escapeHtml(t.id)}">删除</button>
+          </td>
+        </tr>`;
+      }).join('');
+      body.querySelectorAll('[data-toggle]').forEach(b => b.addEventListener('click', async () => {
+        await api(`/api/monitor/tasks/${b.dataset.toggle}/toggle`, { method: 'POST' });
+        loadTasks();
+      }));
+      body.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => {
+        if (!confirm('删除该监控任务？')) return;
+        await api(`/api/monitor/tasks/${b.dataset.del}`, { method: 'DELETE' });
+        loadTasks(); toast('任务已删除', 'success');
+      }));
+    } catch (err) { toast(err.message, 'error'); }
+  }
+
+  const ALERT_ICONS = { price_drop: '↓', low_price: '★', promo: '促', coupon: '券', free_trial: '免', free_buy: '0' };
+  const ALERT_LABELS = { price_drop: '降价', low_price: '历史低价', promo: '促销', coupon: '优惠券', free_trial: '0元试用', free_buy: '0元购' };
+
+  async function loadAlerts() {
+    try {
+      const data = await api('/api/monitor/alerts?limit=100');
+      const alerts = data.alerts || [];
+      $('alertBadge').textContent = `${alerts.length} 条`;
+      const pill = $('alertPill');
+      $('alertCount').textContent = `${alerts.length} 条优惠`;
+      pill.classList.toggle('has-alert', alerts.length > 0);
+      const box = $('alertList');
+      if (!alerts.length) { box.innerHTML = '<div class="empty-alert">暂无优惠消息</div>'; return; }
+      box.innerHTML = alerts.map(a => {
+        const icon = ALERT_ICONS[a.alert_type] || '促';
+        const label = ALERT_LABELS[a.alert_type] || a.alert_type || '优惠';
+        const price = a.new_price != null ? `¥${Number(a.new_price).toFixed(2)}` : '';
+        const link = safeUrl(a.url);
+        return `<div class="alert-item ${a.is_read ? '' : 'unread'}">
+          <div class="alert-icon ${escapeHtml(a.alert_type)}">${icon}</div>
+          <div class="alert-body">
+            <div class="alert-title">${escapeHtml(a.message || a.title)}</div>
+            <div class="alert-meta">${escapeHtml(a.platform_name || a.platform)} · ${escapeHtml(label)} · ${escapeHtml(a.created_at)}</div>
+          </div>
+          ${price ? `<div class="alert-price">${price}</div>` : ''}
+          ${link ? `<a href="${escapeHtml(link)}" target="_blank" rel="noopener">查看 ↗</a>` : ''}
+        </div>`;
+      }).join('');
+    } catch (err) { /* 静默 */ }
+  }
+
+  function openTaskModal() {
+    const sel = $('taskPlatform');
+    sel.innerHTML = state.platforms.filter(p => p.enabled).map(p =>
+      `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join('');
+    $('taskModal').classList.remove('hidden');
+  }
+
+  async function saveTask() {
+    const keyword = $('taskKeyword').value.trim();
+    if (!keyword) { toast('请输入监控关键词', 'error'); return; }
+    try {
+      await api('/api/monitor/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          platform: $('taskPlatform').value,
+          keyword,
+          specs: $('taskSpecs').value.trim(),
+          interval: Number($('taskInterval').value) || 300,
+        }),
+      });
+      $('taskModal').classList.add('hidden');
+      $('taskKeyword').value = '';
+      toast('监控任务已创建', 'success');
+      loadTasks();
+    } catch (err) { toast(err.message, 'error'); }
+  }
+
+  async function init() {
+    $('loginBtn').addEventListener('click', startLogin);
+    $('refreshLoginBtn').addEventListener('click', () => refreshStatus(true).then(() => toast('登录态已更新')).catch((e) => toast(e.message, 'error')));
+    $('clearLoginBtn').addEventListener('click', clearLogin);
+    $('loginCancelBtn').addEventListener('click', cancelLogin);
+    $('loginDoneBtn').addEventListener('click', markLoginDone);
+    $('searchForm').addEventListener('submit', doSearch);
+    $('exportBtn').addEventListener('click', exportCsv);
+    $('clearBtn').addEventListener('click', clearResults);
+
+    // 监控相关
+    document.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => switchView(b.dataset.view)));
+    $('alertPill').addEventListener('click', () => switchView('monitor'));
+    $('addTaskBtn').addEventListener('click', openTaskModal);
+    $('taskCancelBtn').addEventListener('click', () => $('taskModal').classList.add('hidden'));
+    $('taskSaveBtn').addEventListener('click', saveTask);
+    $('readAllBtn').addEventListener('click', async () => {
+      await api('/api/monitor/alerts/read-all', { method: 'POST' });
+      loadAlerts();
+    });
+    $('clearAlertsBtn').addEventListener('click', async () => {
+      if (!confirm('清空所有优惠消息？')) return;
+      await api('/api/monitor/alerts', { method: 'DELETE' });
+      loadAlerts();
+    });
+
+    // 定时轮询告警
+    loadAlerts();
+    alertPoll = setInterval(loadAlerts, 15000);
+
+    try {
+      const data = await api('/api/platforms');
+      state.platforms = data.platforms || [];
+      state.platformMap = Object.fromEntries(state.platforms.map((p) => [p.id, p]));
+      const first = state.platforms.find((p) => p.enabled) || state.platforms[0];
+      if (first) selectPlatform(first.id);
+      $('servicePill').className = 'pill online';
+      $('servicePill').innerHTML = '<span class="dot"></span>服务在线';
+    } catch (err) {
+      $('servicePill').className = 'pill offline';
+      $('servicePill').innerHTML = '<span class="dot"></span>服务不可用';
+      toast('无法连接后端服务', 'error');
+    }
+  }
+
+  init();
+})();
