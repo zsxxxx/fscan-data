@@ -55,6 +55,8 @@ class Product(BaseModel):
     shop: str = ""
     specs: str = ""
     keyword: str = ""
+    run_id: str = ""                     # 所属采集批次
+    source: str = "dom"                  # 解析来源：dom / json / fallback
     crawled_at: str = Field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
 
@@ -68,6 +70,8 @@ class SearchResponse(BaseModel):
     filtered: bool = True
     message: str = ""
     elapsed: float = 0.0
+    run_id: str = ""
+    stale: bool = False                  # 限流期间返回的缓存结果
 
 
 class PlatformStatus(BaseModel):
@@ -138,3 +142,48 @@ class PriceHistoryPoint(BaseModel):
     promo_price: Optional[float] = None
     captured_at: str
     promo_label: str = ""
+
+
+# ------------------------------------------------------------------ 采集诊断
+
+class CrawlRun(BaseModel):
+    """一次采集批次的元数据。"""
+
+    id: str
+    platform: str
+    keyword: str
+    filters: dict[str, str] = Field(default_factory=dict)
+    pages: int = 1
+    status: str = ""
+    product_count: int = 0
+    elapsed: float = 0.0
+    proxy: str = ""
+    error: str = ""
+    stale: bool = False
+    started_at: str = ""
+    finished_at: str = ""
+
+
+class ProductObservation(BaseModel):
+    """规范化商品观测记录。"""
+
+    id: int = 0
+    run_id: str = ""
+    platform: str
+    sku: str = ""
+    title: str = ""
+    url: str = ""
+    image: str = ""
+    shop: str = ""
+    price: Optional[float] = None
+    promo_price: Optional[float] = None
+    list_price: Optional[float] = None
+    sales: str = ""
+    stock: str = ""
+    promo_type: str = ""
+    promo_label: str = ""
+    coupon: str = ""
+    keyword: str = ""
+    rank: int = 0
+    source: str = "dom"
+    captured_at: str = ""
