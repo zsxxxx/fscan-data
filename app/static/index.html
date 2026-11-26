@@ -211,10 +211,15 @@
   </div>
 
   <div id="loginModal" class="overlay hidden">
-    <div class="modal">
+    <div class="modal login-modal">
       <h3 id="loginModalTitle">登录淘宝</h3>
-      <p id="loginModalMsg">正在打开浏览器…</p>
-      <div class="modal-tip">请在弹出的浏览器窗口中扫码或输入账号密码完成登录，系统会自动检测登录状态。</div>
+      <p id="loginModalMsg">登录页已嵌入当前页面，请在下方完成登录。</p>
+      <iframe id="loginFrame" class="login-frame" title="平台登录页"></iframe>
+      <div class="modal-tip">
+        页面被平台拒绝嵌入时，可
+        <button id="loginOpenTabBtn" class="link-btn" type="button">在当前浏览器新标签打开</button>。
+        注意：此处登录的 Cookie 属于当前浏览器，采集器使用独立登录态，完成后仍需点击「我已完成登录」检测。
+      </div>
       <div class="modal-actions">
         <button id="loginCancelBtn" class="btn btn-ghost">取消</button>
         <button id="loginDoneBtn" class="btn btn-primary">我已完成登录</button>

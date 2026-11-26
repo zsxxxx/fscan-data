@@ -269,25 +269,17 @@
 
   async function startLogin() {
     const platform = state.platformMap[state.selected];
-    try {
-      const task = await api(`/api/platforms/${encodeURIComponent(platform.id)}/login`, { method: 'POST' });
-      $('loginModalMsg').textContent = task.message || '正在打开浏览器…';
-      $('loginModal').classList.remove('hidden');
-      setBadge('wait', '登录中');
-      setNavStatus(platform.id, 'wait');
-      stopLoginPoll();
-      state.loginPoll = setInterval(pollLoginTask, 2000);
-      pollLoginTask();
-    } catch (err) {
-      toast(err.message, 'error');
-    }
+    stopLoginPoll();
+    $('loginModalTitle').textContent = `登录${platform.name}`;
+    $('loginModalMsg').textContent = '登录页已嵌入当前页面，请在下方完成登录。';
+    $('loginFrame').src = platform.login_url || platform.home_url;
+    $('loginModal').classList.remove('hidden');
+    setBadge('wait', '登录中');
+    setNavStatus(platform.id, 'wait');
   }
 
   async function cancelLogin() {
-    try {
-      await api(`/api/platforms/${encodeURIComponent(state.selected)}/login/cancel`, { method: 'POST' });
-    } catch (err) { /* 忽略取消失败 */ }
-    stopLoginPoll();
+    $('loginFrame').src = 'about:blank';
     $('loginModal').classList.add('hidden');
     refreshStatus(true);
   }
@@ -296,16 +288,21 @@
     $('loginModalMsg').textContent = '正在检测登录状态…';
     try {
       const status = await refreshStatus(true);
+      $('loginFrame').src = 'about:blank';
+      $('loginModal').classList.add('hidden');
       if (status.logged_in) {
-        stopLoginPoll();
-        $('loginModal').classList.add('hidden');
         toast('登录状态已保存', 'success');
       } else {
-        $('loginModalMsg').textContent = '未检测到登录态，请在浏览器中完成登录后再试。';
+        toast('当前浏览器登录态与采集器不互通，请改用采集浏览器登录或导入 Cookie', 'error');
       }
     } catch (err) {
       $('loginModalMsg').textContent = err.message;
     }
+  }
+
+  function openLoginInTab() {
+    const platform = state.platformMap[state.selected];
+    window.open(platform.login_url || platform.home_url, '_blank', 'noopener');
   }
 
   async function clearLogin() {
@@ -605,6 +602,7 @@
     $('clearLoginBtn').addEventListener('click', clearLogin);
     $('loginCancelBtn').addEventListener('click', cancelLogin);
     $('loginDoneBtn').addEventListener('click', markLoginDone);
+    $('loginOpenTabBtn').addEventListener('click', openLoginInTab);
     $('searchForm').addEventListener('submit', doSearch);
     $('exportBtn').addEventListener('click', exportCsv);
     $('clearBtn').addEventListener('click', clearResults);
