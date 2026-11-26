@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 from ..config import Platform
+from .ali1688 import Ali1688Crawler
 from .base import BaseCrawler
+from .douyin import DouyinCrawler
 from .jd import JDCrawler
+from .pdd import PDDCrawler
 from .taobao import TaobaoCrawler
 
 REGISTRY: dict[str, type[BaseCrawler]] = {
     "taobao": TaobaoCrawler,
     "jd": JDCrawler,
+    "pdd": PDDCrawler,
+    "douyin": DouyinCrawler,
+    "ali1688": Ali1688Crawler,
 }
 
 

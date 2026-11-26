@@ -80,8 +80,14 @@ def abs_url(href: Any, base: str = "") -> str:
 
 def looks_like_product(obj: dict) -> bool:
     """粗略判断一个 JSON 对象是否是商品数据。"""
-    title_keys = ("title", "raw_title", "name", "itemTitle", "wareName", "productName")
-    price_keys = ("price", "view_price", "priceInt", "jdPrice", "salePrice")
+    title_keys = (
+        "title", "raw_title", "name", "itemTitle", "wareName", "productName",
+        "goods_name", "goodsName", "subject",
+    )
+    price_keys = (
+        "price", "view_price", "priceInt", "jdPrice", "salePrice",
+        "minPrice", "priceInfo", "priceText",
+    )
     return (
         len(obj) >= 3
         and any(k in obj for k in title_keys)
@@ -244,7 +250,13 @@ class BaseCrawler:
     def _login_required(page) -> bool:
         """识别被平台跳转到登录页或搜索结果要求登录的情况。"""
         url = (page.url or "").lower()
-        if any(marker in url for marker in ("passport.jd.com", "login.taobao.com", "login.1688.com")):
+        if any(
+            marker in url
+            for marker in (
+                "passport.jd.com", "login.taobao.com", "login.1688.com",
+                "mobile.yangkeduo.com/login", "douyin.com/login",
+            )
+        ):
             return True
         try:
             body = page.locator("body").inner_text(timeout=3000) or ""
