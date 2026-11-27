@@ -41,3 +41,7 @@
 2026-11-27 10:43 侧边栏收窄
 13. 问题：左侧菜单栏 220px 过宽，占用右侧数据列表空间，用户要求缩短侧栏、扩大数据列表整屏展示。
     修改：style.css 将 .sidebar 宽度及 flex-basis 由 220px 改为 150px，左右 padding 由 18px/12px 收紧为 14px/8px；.side-title 字号 12→11px、padding 收紧；.platform-nav 间距 4→2px；.platform-item padding 10px/12px→8px/8px、gap 10→7px、字号 14→13px；.side-foot 及说明文字同步收紧。实测侧栏 150px、内容区由 1060px 增至 1130px、表格区 1052px，侧栏文字无溢出无截断、无内部滚动。UI 回归脚本（含分页）全部通过。
+
+2026-11-27 11:05 界面二次紧凑
+14. 问题：侧栏仍偏宽、顶部标题栏过高、平台行/搜索行的上方空白间隔过宽、商品搜索下拉多选的选项间距过大，用户要求全部压到最小。
+    修改：① 侧栏 150→118px，padding/font/gap 同步收紧（side-title 10px、platform-item padding 6px/gap 5px/字号 12px）；② 顶栏 64→40px（logo 36→26px、标题 17→14px、副标题 12→10px），.layout 高度同步改为 calc(100vh - 40px)；③ 内容区 padding 16/24/20→8/12/10、内容间距 12→4px，#searchView gap 6→3px，三卡 padding 4px→2px；④ 下拉面板 .ms-panel padding 6→2px、.ms-item padding 6px/8px→2px/6px、gap 8→5px、字号 13→12px、行高 1.2。实测顶栏 40px、侧栏 118px、平台行 28.4px、搜索行 26px、下拉单选项 19px，侧栏文字无溢出。UI 回归脚本（含分页）全部通过。
