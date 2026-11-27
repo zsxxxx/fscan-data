@@ -360,3 +360,33 @@ button:disabled { opacity: .6; cursor: not-allowed; }
 #alertPill { cursor:pointer; }
 #alertPill.has-alert { background:#fee2e2; color:#b91c1c; }
 #alertPill.has-alert .dot { background:#dc2626; }
+
+/* ===== 商品搜索视图顶部三行压缩到最小高度 ===== */
+#searchView { gap: 6px; }
+.platform-card,
+.search-card,
+.result-card { padding: 4px 14px; }
+.result-card > .card-head { margin-bottom: 0; }
+
+.platform-row .head-left,
+.search-head .head-left,
+.result-card > .card-head .head-left { gap: 6px; }
+
+.platform-card h2,
+.search-card h2,
+.result-card h2 { font-size: 13px; line-height: 1.2; }
+
+.platform-card .note,
+.platform-card .hint,
+.search-card .note,
+.result-card .note { font-size: 11px; line-height: 1.2; }
+
+.platform-card .badge { padding: 1px 7px; font-size: 11px; line-height: 1.2; }
+.platform-card .btn,
+.result-card .btn { padding: 3px 8px; font-size: 12px; line-height: 1.2; }
+.search-card .collapse-btn { width: 20px; height: 20px; font-size: 11px; }
+.platform-card .login-row,
+.result-card .toolbar { gap: 6px; }
+/* 去掉 h2 默认上下外边距与 .card-head 的下外边距对紧凑行的撑高 */
+.platform-card h2 { margin: 0; }
+.search-card .card-head { margin-bottom: 0; }
