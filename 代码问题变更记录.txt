@@ -37,3 +37,7 @@
 2026-11-27 10:10 数据列表分页
 12. 问题：数据列表结果多时一次性渲染全部行，页面过长且不便查看，用户要求添加分页，默认 100 条/页，可选 100/200/500/1000/2000/10000。
     修改：index.html 在 table-wrap 后新增 .pagination 控件（每页条数下拉、共 N 条、页码 x/y、首页/上一页/下一页/末页按钮，高度 30px）；style.css 新增紧凑分页样式；app.js 的 state 增加 page/pageSize，renderResults 重置页码并调用新的 renderTable()，按页切片渲染、序号跨页连续，renderPagination() 同步页码与按钮禁用态，init() 绑定五个分页事件；clearResults() 一并重置分页。CSV 导出仍导出全部结果、不受当前页影响。README 同步。新增 data/verify_pagination.py，覆盖默认 100、翻页、末页 50 行、边界禁用、切换条数重置页码、选项完整性，全部通过；UI 回归脚本全部通过。
+
+2026-11-27 10:43 侧边栏收窄
+13. 问题：左侧菜单栏 220px 过宽，占用右侧数据列表空间，用户要求缩短侧栏、扩大数据列表整屏展示。
+    修改：style.css 将 .sidebar 宽度及 flex-basis 由 220px 改为 150px，左右 padding 由 18px/12px 收紧为 14px/8px；.side-title 字号 12→11px、padding 收紧；.platform-nav 间距 4→2px；.platform-item padding 10px/12px→8px/8px、gap 10→7px、字号 14→13px；.side-foot 及说明文字同步收紧。实测侧栏 150px、内容区由 1060px 增至 1130px、表格区 1052px，侧栏文字无溢出无截断、无内部滚动。UI 回归脚本（含分页）全部通过。
