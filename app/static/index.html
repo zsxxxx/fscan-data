@@ -203,6 +203,27 @@
             </tbody>
           </table>
         </div>
+        <div class="pagination" id="pagination">
+          <div class="page-size">
+            <span>每页</span>
+            <select id="pageSize" aria-label="每页条数">
+              <option value="100" selected>100 条</option>
+              <option value="200">200 条</option>
+              <option value="500">500 条</option>
+              <option value="1000">1000 条</option>
+              <option value="2000">2000 条</option>
+              <option value="10000">10000 条</option>
+            </select>
+          </div>
+          <span id="pageInfo" class="page-info">共 0 条</span>
+          <div class="page-nav">
+            <button id="firstPageBtn" class="page-btn" type="button" title="首页" disabled>«</button>
+            <button id="prevPageBtn" class="page-btn" type="button" title="上一页" disabled>‹</button>
+            <span id="pageNum" class="page-num">1 / 1</span>
+            <button id="nextPageBtn" class="page-btn" type="button" title="下一页" disabled>›</button>
+            <button id="lastPageBtn" class="page-btn" type="button" title="末页" disabled>»</button>
+          </div>
+        </div>
       </section>
       </div><!-- /searchView -->
     </main>

@@ -10,6 +10,8 @@
     products: [],
     lastResponse: null,
     loginPoll: null,
+    page: 1,
+    pageSize: 100,
   };
 
   function escapeHtml(value) {
@@ -392,6 +394,7 @@
   function renderResults(data) {
     state.lastResponse = data;
     state.products = data.products || [];
+    state.page = 1;
     $('resultCount').textContent = `${data.total} 条`;
     $('resultMeta').textContent = `${data.keyword || ''} · 耗时 ${data.elapsed}s${data.filtered ? '' : ' · 规格未命中，显示未过滤结果'}${data.stale ? ' · 限流中，展示缓存结果' : ''}${data.detail_fallback ? ' · 详情页直采' : ''}${data.run_id ? ` · 批次 ${data.run_id}` : ''}`;
 
@@ -403,13 +406,33 @@
       bar.classList.add('hidden');
     }
 
+    renderTable();
+  }
+
+  function renderPagination(total, pageCount) {
+    $('pageInfo').textContent = `共 ${total} 条`;
+    $('pageNum').textContent = `${state.page} / ${pageCount}`;
+    $('firstPageBtn').disabled = $('prevPageBtn').disabled = state.page <= 1;
+    $('nextPageBtn').disabled = $('lastPageBtn').disabled = state.page >= pageCount;
+  }
+
+  function renderTable() {
     const body = $('resultBody');
-    if (!state.products.length) {
+    const total = state.products.length;
+    const size = state.pageSize;
+    const pageCount = Math.max(1, Math.ceil(total / size));
+    if (state.page > pageCount) state.page = pageCount;
+    renderPagination(total, pageCount);
+
+    if (!total) {
       body.innerHTML = '<tr class="empty-row"><td colspan="12">未采集到商品数据</td></tr>';
       return;
     }
+    const start = (state.page - 1) * size;
+    const pageItems = state.products.slice(start, start + size);
     const fmt = (v) => v == null ? '—' : `¥${Number(v).toFixed(2)}`;
-    body.innerHTML = state.products.map((p, i) => {
+    body.innerHTML = pageItems.map((p, i) => {
+      const index = start + i + 1;
       const link = safeUrl(p.url);
       const cell = (value, width) => `<td title="${escapeHtml(value)}"${width ? ` style="max-width:${width}px"` : ''}>${escapeHtml(value) || '<span style="color:#9ca3af">—</span>'}</td>`;
       const promoPrice = p.promo_price != null
@@ -426,7 +449,7 @@
         promoTag = `<span class="promo-tag ${cls}" title="${escapeHtml(p.promo_label || p.promo_type)}">${escapeHtml(p.promo_type)}</span>`;
       }
       return `<tr>
-        <td class="col-index">${i + 1}</td>
+        <td class="col-index">${index}</td>
         ${cell(p.platform_name)}
         ${cell(p.title, 300)}
         <td class="price">${p.list_price != null ? `<span class="price-strike">¥${Number(p.list_price).toFixed(2)}</span><br>` : ''}${escapeHtml(p.price) || '—'}</td>
@@ -445,6 +468,8 @@
   function clearResults() {
     state.products = [];
     state.lastResponse = null;
+    state.page = 1;
+    renderTable();
     $('resultBody').innerHTML = '<tr class="empty-row"><td colspan="12">暂无数据，请先搜索商品</td></tr>';
     $('resultCount').textContent = '0 条';
     $('resultMeta').textContent = '';
@@ -685,6 +710,18 @@
     });
     $('exportBtn').addEventListener('click', exportCsv);
     $('clearBtn').addEventListener('click', clearResults);
+    $('pageSize').addEventListener('change', (e) => {
+      state.pageSize = Number(e.target.value) || 100;
+      state.page = 1;
+      renderTable();
+    });
+    $('firstPageBtn').addEventListener('click', () => { state.page = 1; renderTable(); });
+    $('prevPageBtn').addEventListener('click', () => { if (state.page > 1) { state.page--; renderTable(); } });
+    $('nextPageBtn').addEventListener('click', () => { state.page++; renderTable(); });
+    $('lastPageBtn').addEventListener('click', () => {
+      state.page = Math.max(1, Math.ceil(state.products.length / state.pageSize));
+      renderTable();
+    });
 
     // 监控相关
     document.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => switchView(b.dataset.view)));

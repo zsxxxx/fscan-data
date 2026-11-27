@@ -390,3 +390,26 @@ button:disabled { opacity: .6; cursor: not-allowed; }
 /* 去掉 h2 默认上下外边距与 .card-head 的下外边距对紧凑行的撑高 */
 .platform-card h2 { margin: 0; }
 .search-card .card-head { margin-bottom: 0; }
+
+/* ===== 数据列表分页 ===== */
+.pagination {
+  flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; padding-top: 6px; font-size: 12px; color: var(--muted);
+}
+.page-size { display: flex; align-items: center; gap: 6px; }
+.page-size select {
+  height: 24px; padding: 0 6px;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: #fff; color: var(--text); font-size: 12px; cursor: pointer;
+}
+.page-info { white-space: nowrap; }
+.page-nav { display: flex; align-items: center; gap: 4px; }
+.page-btn {
+  min-width: 24px; height: 24px; padding: 0 6px;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: #fff; color: var(--text); font-size: 12px; line-height: 1; cursor: pointer;
+}
+.page-btn:hover:not(:disabled) { background: #f3f6fb; border-color: var(--primary); color: var(--primary); }
+.page-btn:disabled { opacity: .45; cursor: not-allowed; }
+.page-num { min-width: 62px; text-align: center; color: var(--text); }
