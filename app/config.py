@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from urllib.parse import quote
 
@@ -58,6 +58,7 @@ class Platform:
     login_url: str
     search_url: str
     fallback_search_url: str = ""       # 主页面改版/风控时的备用搜索入口
+    detail_url_template: str = ""       # SKU 详情页直采入口，绕开搜索页限流
     login_selectors: tuple[str, ...] = ()
     enabled: bool = True
     note: str = ""
@@ -86,6 +87,11 @@ class Platform:
         brand = flt.get("brand")
         if brand:
             extra_terms.extend(t.strip() for t in str(brand).split(",") if t.strip())
+        # 通用附加条件作为关键词补充，避免平台参数差异导致筛选失效
+        for key in ("promo_type", "ship_from"):
+            value = str(flt.get(key, "")).strip()
+            if value and value not in extra_terms:
+                extra_terms.append(value)
         q = keyword
         if extra_terms:
             q = keyword + "%20" + "%20".join(quote(t, safe="") for t in extra_terms)
@@ -243,6 +249,19 @@ BRAND_OPTIONS = _brand_pairs(
     "译林出版社", "作家出版社", "新东方", "得到", "樊登读书",
 )
 
+# ---- 五平台通用附加筛选 ----
+COMMON_FILTER_FIELDS = (
+    SearchField("promo_type", "优惠类型", "select", options=(
+        ("", "全部优惠"), ("优惠券", "优惠券"), ("满减", "满减"),
+        ("秒杀", "秒杀"), ("补贴", "补贴"), ("包邮", "包邮"), ("新品", "新品"),
+    )),
+    SearchField("ship_from", "发货地", "select", options=(
+        ("", "不限发货地"), ("北京", "北京"), ("上海", "上海"), ("广东", "广东"),
+        ("浙江", "浙江"), ("江苏", "江苏"), ("福建", "福建"), ("山东", "山东"),
+        ("四川", "四川"), ("湖北", "湖北"),
+    )),
+)
+
 # ---- 京东：参照京东搜索页左侧真实分类树 ----
 JD_CATEGORY_TREE = {
     "家用电器": (("电视", "电视"), ("空调", "空调"), ("冰箱", "冰箱"), ("洗衣机", "洗衣机"),
@@ -383,6 +402,7 @@ PLATFORMS: tuple[Platform, ...] = (
         login_url="https://login.taobao.com/member/login.jhtml",
         search_url="https://s.taobao.com/search?q={q}",
         fallback_search_url="https://s.taobao.com/search?q={q}&tab=mall",
+        detail_url_template="https://item.taobao.com/item.htm?id={sku}",
         login_selectors=(".site-nav-user", ".site-nav-login-info-nick", "[class*='site-nav-user']"),
         search_fields=(
             PRICE_RANGE_FIELD,
@@ -411,6 +431,7 @@ PLATFORMS: tuple[Platform, ...] = (
         login_url="https://passport.jd.com/uc/login",
         search_url="https://search.jd.com/Search?keyword={q}&enc=utf-8&page={page}",
         fallback_search_url="https://so.m.jd.com/ware/search.action?keyword={q}",
+        detail_url_template="https://item.m.jd.com/product/{sku}.html",
         login_selectors=("#ttbar-login .nickname", ".nickname", ".user-login", "[class*='user-name']"),
         search_fields=(
             PRICE_RANGE_FIELD,
@@ -441,6 +462,7 @@ PLATFORMS: tuple[Platform, ...] = (
         home_url="https://www.pinduoduo.com",
         login_url="https://mobile.yangkeduo.com/login.html",
         search_url="https://mobile.yangkeduo.com/search_result.html?search_key={q}&page={page}",
+        detail_url_template="https://mobile.yangkeduo.com/goods.html?goods_id={sku}",
         enabled=True,
         search_fields=(
             PRICE_RANGE_FIELD,
@@ -467,6 +489,7 @@ PLATFORMS: tuple[Platform, ...] = (
         home_url="https://www.douyin.com",
         login_url="https://www.douyin.com",
         search_url="https://www.douyin.com/search/{q}?type=general&page={page}",
+        detail_url_template="https://www.douyin.com/video/{sku}",
         enabled=True,
         search_fields=(
             PRICE_RANGE_FIELD,
@@ -490,6 +513,7 @@ PLATFORMS: tuple[Platform, ...] = (
         home_url="https://www.1688.com",
         login_url="https://login.1688.com/member/signin.htm",
         search_url="https://s.1688.com/selloffer/offer_search.htm?keywords={q}&beginPage={page}",
+        detail_url_template="https://detail.1688.com/offer/{sku}.html",
         enabled=True,
         search_fields=(
             PRICE_RANGE_FIELD,
@@ -511,6 +535,12 @@ PLATFORMS: tuple[Platform, ...] = (
             ("0元拿样", "0元试用", "https://www.1688.com"),
         ),
     ),
+)
+
+# 为所有平台统一追加通用筛选条件
+PLATFORMS = tuple(
+    replace(platform, search_fields=platform.search_fields + COMMON_FILTER_FIELDS)
+    for platform in PLATFORMS
 )
 
 PLATFORM_MAP: dict[str, Platform] = {p.id: p for p in PLATFORMS}

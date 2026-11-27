@@ -393,6 +393,20 @@ def list_runs(limit: int = 50, platform: str | None = None) -> list[dict]:
     return out
 
 
+def list_skus(platform: str, keyword: str | None = None, limit: int = 50) -> list[str]:
+    """取历史观测中出现过的 SKU，用于详情页直采兜底。"""
+    sql = "SELECT DISTINCT sku FROM product_observations WHERE platform=? AND sku<>''"
+    params: list = [platform]
+    if keyword:
+        sql += " AND keyword=?"
+        params.append(keyword)
+    sql += " ORDER BY id DESC LIMIT ?"
+    params.append(limit)
+    with _LOCK, _connect() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return [r["sku"] for r in rows if r["sku"]]
+
+
 def record_observation(obs: dict) -> None:
     """写入一条规范化商品观测。"""
     with _LOCK, _connect() as conn:

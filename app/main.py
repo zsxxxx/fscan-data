@@ -185,7 +185,7 @@ def _apply_filters(products, req: SearchRequest, platform) -> tuple[list, bool]:
         return any(term.lower() in haystack for term in terms)
 
     # 一级 category 已并入搜索关键词，这里只对具体的二级分类与勾选值做本地过滤
-    for key in ("brand", "location", "category_sub", "service"):
+    for key in ("brand", "location", "category_sub", "service", "promo_type", "ship_from"):
         value = filters.get(key)
         if not value:
             continue
@@ -277,6 +277,33 @@ def history():
         return {"items": []}
 
 
+def _detail_fallback_skus(platform, keyword: str, req: SearchRequest) -> list[str]:
+    """取历史 SKU 作为详情页直采候选；条数受最大条数约束且有上限。"""
+    limit = 30
+    if req.max_results and req.max_results > 0:
+        limit = min(limit, max(1, req.max_results))
+    return store.list_skus(platform.id, keyword, limit=limit)
+
+
+def _run_detail_fallback(platform, crawler, keyword: str, req: SearchRequest, run_id: str, proxy_url: str):
+    """冷却期内不请求搜索页，直接访问历史 SKU 详情页。"""
+    skus = _detail_fallback_skus(platform, keyword, req)
+    if not skus or not platform.detail_url_template:
+        return []
+    log.info("搜索页冷却，切换详情页直采：%s / %s / %d 个 SKU", platform.name, keyword, len(skus))
+    with BROWSER_LOCK:
+        with sync_playwright() as pw:
+            context = launch_context(pw, platform, headless=True, proxy=proxy_url)
+            page = context.pages[0] if context.pages else context.new_page()
+            try:
+                return crawler.crawl_details(page, skus, keyword, run_id)
+            finally:
+                try:
+                    context.close()
+                except Exception:  # noqa: BLE001
+                    pass
+
+
 @app.post("/api/search", response_model=SearchResponse)
 def search(req: SearchRequest):
     platform = _platform(req.platform)
@@ -322,9 +349,33 @@ def search(req: SearchRequest):
                     f"平台限流冷却中（约 {int(remaining)} 秒），展示上次缓存结果"
                 )
                 return SearchResponse(**payload)
+
+            # 换思路：搜索页冷却时改走历史 SKU 详情页，不触碰搜索接口
+            detail_products = _run_detail_fallback(platform, crawler, keyword, req, run_id, proxy_url)
+            if detail_products:
+                filtered, strict = _apply_filters(detail_products, req, platform)
+                product_count = len(filtered)
+                status = "detail_fallback"
+                response = SearchResponse(
+                    platform=platform.id,
+                    platform_name=platform.name,
+                    keyword=keyword,
+                    specs=req.specs.strip(),
+                    products=filtered,
+                    total=product_count,
+                    filtered=strict,
+                    message=f"搜索页限流中，已切换详情页直采 {product_count} 条（不请求搜索页）",
+                    elapsed=round(time.time() - started, 2),
+                    run_id=run_id,
+                    detail_fallback=True,
+                )
+                return response
             raise HTTPException(
                 status_code=429,
-                detail=f"{platform.name} 仍处于限流冷却期，请约 {int(remaining)} 秒后再试",
+                detail=(
+                    f"{platform.name} 搜索页限流冷却中（约 {int(remaining)} 秒），"
+                    "且暂无历史 SKU 可供详情页直采"
+                ),
             )
 
         # 2) 有效缓存直接返回
@@ -355,8 +406,22 @@ def search(req: SearchRequest):
             with sync_playwright() as pw:
                 context = launch_context(pw, platform, headless=True, proxy=proxy_url)
                 page = context.pages[0] if context.pages else context.new_page()
+                detail_fallback = False
                 try:
                     products = crawler.crawl(page, keyword, req.pages, req.filters, run_id)
+                except RateLimitedError as limited:
+                    # 搜索页被限流：不再重试搜索，改走历史 SKU 详情页
+                    skus = _detail_fallback_skus(platform, keyword, req)
+                    if not skus or not platform.detail_url_template:
+                        raise limited
+                    log.info("搜索页触发限流，切换详情页直采：%s / %s", platform.name, keyword)
+                    rate_guard.mark_limited(platform.id)
+                    if proxy_entry:
+                        proxy_pool.mark_failed(proxy_entry, platform.id)
+                    products = crawler.crawl_details(page, skus, keyword, run_id)
+                    detail_fallback = bool(products)
+                    if not products:
+                        raise limited
                 finally:
                     try:
                         context.close()
@@ -366,7 +431,9 @@ def search(req: SearchRequest):
         filtered, strict = _apply_filters(products, req, platform)
         product_count = len(filtered)
         message = ""
-        if not products:
+        if detail_fallback:
+            message = f"搜索页限流，已切换详情页直采 {product_count} 条（不请求搜索页）"
+        elif not products:
             message = "未采集到商品，请确认已登录并检查平台页面结构是否变化"
         elif not strict:
             message = "筛选条件未命中任何商品，已展示未过滤结果"
@@ -383,6 +450,7 @@ def search(req: SearchRequest):
                 "run_id": run_id,
                 "proxy": proxy_url,
                 "stale": False,
+                "detail_fallback": detail_fallback,
                 "at": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
         )
@@ -398,6 +466,7 @@ def search(req: SearchRequest):
             message=message,
             elapsed=round(time.time() - started, 2),
             run_id=run_id,
+            detail_fallback=detail_fallback,
         )
         if products:
             rate_guard.mark_success(platform.id)
@@ -406,7 +475,7 @@ def search(req: SearchRequest):
             rate_guard.cache_put(
                 platform.id, keyword, req.filters, req.pages, response.model_dump()
             )
-        status = "success"
+        status = "detail_fallback" if detail_fallback else "success"
         return response
 
     except LoginRequiredError as exc:

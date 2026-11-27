@@ -72,6 +72,7 @@ class SearchResponse(BaseModel):
     elapsed: float = 0.0
     run_id: str = ""
     stale: bool = False                  # 限流期间返回的缓存结果
+    detail_fallback: bool = False        # 搜索页限流后改用详情页直采
 
 
 class PlatformStatus(BaseModel):

@@ -15,6 +15,35 @@ from .. import store
 
 _PRICE_RE = re.compile(r"(?:¥|￥|\$)?\s*([\d,]+(?:\.\d{1,2})?)")
 
+# 详情页直采：搜索页限流时改走历史 SKU 的详情页，降低对搜索接口的依赖
+DETAIL_ITEM_JS = r"""() => {
+  const text = (el) => ((el && (el.innerText || el.textContent)) || '').replace(/\s+/g, ' ').trim();
+  const meta = (name) => {
+    const el = document.querySelector('meta[property="' + name + '"], meta[name="' + name + '"], meta[itemprop="' + name + '"]');
+    return el ? (el.getAttribute('content') || '').trim() : '';
+  };
+  const leafs = Array.from(document.querySelectorAll('span,div,h1,h2,p'))
+    .filter((e) => e.children.length === 0 && text(e).length < 120);
+  const priceLeaf = leafs.find((e) => /^\s*[¥￥]?\s*[\d,]+(?:\.\d{1,2})?\s*$/.test(text(e))) ||
+    document.querySelector('[class*="price"]');
+  const sku = meta('product:id') || meta('sku') ||
+    ((location.pathname.match(/\/(\d{6,})(?:\.html)?$/) || [])[1] || '');
+  const promoTexts = leafs
+    .filter((e) => /优惠券|券后|满减|补贴|秒杀|限时|直降|降价|0元|免费|包邮/.test(text(e)))
+    .map((e) => text(e));
+  return {
+    title: meta('og:title') || text(document.querySelector('h1')) || document.title || '',
+    sku,
+    url: location.href,
+    image: meta('og:image') || (document.querySelector('img[src]') || {}).src || '',
+    price: text(priceLeaf),
+    shop: meta('og:site_name') || text(document.querySelector('[class*="shop"], [class*="store"]')) || '',
+    sales: text(document.querySelector('[class*="sales"], [class*="sold"]')),
+    promo_label: Array.from(new Set(promoTexts)).join(' ').slice(0, 120),
+    source: 'detail',
+  };
+}"""
+
 # 优惠类型识别关键词（按优先级）
 PROMO_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("0元购", ("0元购", "零元购", "免费领", "0元抢")),
@@ -408,3 +437,40 @@ class BaseCrawler:
                 if product.title:
                     products.append(product)
         return dedupe(products)
+
+    def crawl_details(
+        self,
+        page,
+        skus: list[str],
+        keyword: str,
+        run_id: str = "",
+        limit: int = 30,
+    ) -> list[Product]:
+        """详情页直采兜底：不请求搜索页，逐个访问历史 SKU 详情页。
+
+        搜索页风控最严格，详情页通常独立限流；这里只采集本地历史中出现过的 SKU，
+        并限制数量与频率，避免把兜底通道也打爆。
+        """
+        if not self.platform.detail_url_template:
+            return []
+        products: list[Product] = []
+        for sku in list(dict.fromkeys(s for s in skus if s))[:limit]:
+            url = self.platform.detail_url_template.format(sku=quote(str(sku), safe=""))
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                human_pause(page, 1200, 2400)
+                if self._login_required(page) or self._captcha_required(page) or self._rate_limited(page):
+                    break
+                raw = self.extract_detail(page)
+            except Exception:  # noqa: BLE001 - 单个 SKU 失败不影响其他历史商品
+                continue
+            raw["sku"] = str(sku)
+            raw["url"] = url
+            raw["source"] = "detail"
+            product = self.to_product(raw, keyword, len(products) + 1, run_id)
+            if product.title and not product.title.startswith("404"):
+                products.append(product)
+        return dedupe(products)
+
+    def extract_detail(self, page) -> dict:
+        return page.evaluate(DETAIL_ITEM_JS) or {}
