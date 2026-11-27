@@ -119,30 +119,32 @@
 
       <!-- ==================== 商品搜索视图 ==================== -->
       <div id="searchView">
-      <section class="card">
-        <div class="card-head">
+      <section class="card platform-card">
+        <div class="platform-row">
           <div class="head-left">
             <h2 id="platformTitle">平台</h2>
             <span id="loginBadge" class="badge badge-idle">未检测</span>
+            <span id="platformNote" class="note"></span>
           </div>
-          <span id="platformNote" class="note"></span>
-        </div>
-        <div class="login-row">
-          <button id="loginBtn" class="btn btn-primary">提前登录</button>
-          <button id="refreshLoginBtn" class="btn btn-ghost">刷新登录态</button>
-          <button id="clearLoginBtn" class="btn btn-ghost danger">清除登录态</button>
-          <span id="loginDetail" class="hint">登录后可采集需要登录才能看到的商品数据。</span>
+          <div class="login-row">
+            <button id="loginBtn" class="btn btn-primary">提前登录</button>
+            <button id="refreshLoginBtn" class="btn btn-ghost">刷新登录态</button>
+            <button id="clearLoginBtn" class="btn btn-ghost danger">清除登录态</button>
+            <span id="loginDetail" class="hint">登录后可采集商品数据</span>
+          </div>
         </div>
       </section>
 
-      <section class="card">
-        <div class="card-head">
+      <section class="card search-card">
+        <div class="card-head search-head">
           <div class="head-left">
+            <button id="searchToggleBtn" class="collapse-btn" type="button" aria-expanded="false">▸</button>
             <h2>商品搜索</h2>
             <span id="searchConditionNote" class="note"></span>
           </div>
+          <span id="searchSummary" class="note">已折叠，点击展开筛选条件</span>
         </div>
-        <form id="searchForm" class="form-grid">
+        <form id="searchForm" class="form-grid hidden">
           <label class="field field-wide">
             <span>搜索关键词</span>
             <input id="keyword" name="keyword" required placeholder="例如：连衣裙 女 夏季">

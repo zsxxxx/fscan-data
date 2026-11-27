@@ -179,6 +179,16 @@
     });
   }
 
+  function setSearchCollapsed(collapsed) {
+    const form = $('searchForm');
+    form.classList.toggle('hidden', collapsed);
+    $('searchToggleBtn').textContent = collapsed ? '▸' : '▾';
+    $('searchToggleBtn').setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    $('searchSummary').textContent = collapsed
+      ? '已折叠，点击展开筛选条件'
+      : '筛选条件已展开';
+  }
+
   function collectFilters() {
     const filters = {};
     document.querySelectorAll('#platformFields [data-filter]').forEach((el) => {
@@ -383,7 +393,7 @@
     state.lastResponse = data;
     state.products = data.products || [];
     $('resultCount').textContent = `${data.total} 条`;
-    $('resultMeta').textContent = `${data.keyword || ''} · 耗时 ${data.elapsed}s${data.filtered ? '' : ' · 规格未命中，显示未过滤结果'}${data.stale ? ' · 限流中，展示缓存结果' : ''}${data.run_id ? ` · 批次 ${data.run_id}` : ''}`;
+    $('resultMeta').textContent = `${data.keyword || ''} · 耗时 ${data.elapsed}s${data.filtered ? '' : ' · 规格未命中，显示未过滤结果'}${data.stale ? ' · 限流中，展示缓存结果' : ''}${data.detail_fallback ? ' · 详情页直采' : ''}${data.run_id ? ` · 批次 ${data.run_id}` : ''}`;
 
     const bar = $('messageBar');
     if (data.message) {
@@ -499,6 +509,7 @@
         body: JSON.stringify(payload),
       });
       renderResults(data);
+      setSearchCollapsed(true);
       toast(`采集完成，共 ${data.total} 条`, 'success');
     } catch (err) {
       $('messageBar').textContent = err.message;
@@ -668,6 +679,10 @@
     $('loginOpenTabBtn').addEventListener('click', openLoginInTab);
     $('loginRetryBtn').addEventListener('click', retryInlineLogin);
     $('searchForm').addEventListener('submit', doSearch);
+    $('searchToggleBtn').addEventListener('click', () => {
+      const collapsed = !$('searchForm').classList.contains('hidden');
+      setSearchCollapsed(collapsed);
+    });
     $('exportBtn').addEventListener('click', exportCsv);
     $('clearBtn').addEventListener('click', clearResults);
 
