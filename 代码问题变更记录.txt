@@ -49,3 +49,13 @@
 2026-11-27 11:10 按钮与状态信息左对齐
 15. 问题：顶部各行（顶栏状态、平台登录按钮组、搜索行提示、数据列表头按钮、分页控件）原为 space-between 两端分布，用户要求所有按钮与状态显示信息左对齐、依次展示。
     修改：style.css 末尾新增覆盖规则，将 .topbar / .platform-row / .card-head / .pagination 的 justify-content 由 space-between 改为 flex-start，并设置各行 gap（顶栏 10px、平台行 12px、搜索/数据头/分页 14px）。实测平台行元素 x 坐标 145→242→314→398→482 依次靠左排列，截图无重叠；UI 回归脚本（含分页）全部通过。
+
+2026-11-27 11:19 登录流程优化（V-0.0.11）
+16. 问题：弹层内嵌登录成功后点击「我已完成登录」无反应——根因是当前浏览器 iframe 的 Cookie 与采集器独立 profile 不互通，检测必然失败；且检测耗时长（后端无头浏览器打开首页约 10~40 秒）界面无进度提示；更关键的是 markLoginDone 里把 iframe src 重置为 about:blank 时触发 onload → handleLoginFrameLoad → showLoginFallback，把刚设置的检测反馈覆盖回「无法嵌入」提示，导致误以为按钮无反应。
+    修改：
+    ① 新增三个弹层状态：登录检测失败卡片（loginCheckFail，明确原因 + 「用采集器浏览器登录」「重新检测」入口）、采集器登录等待态（loginCollectorWait）、统一 hideAllLoginStates()；
+    ② 重写 markLoginDone()：点击即禁用按钮 + 显示 spinner + 分段进度提示（8 秒递增）+ 45 秒超时保护（Promise.race），成功则关闭弹层并 toast，失败进入专门失败态而非退回 fallback；
+    ③ 新增 startCollectorLogin()：调用后端 POST /login 启动有头采集器浏览器（user_data_dir 为平台独立 profile，登录态真正可复用），每 2 秒轮询 login-task，成功自动关闭弹层，失败回失败态；
+    ④ 根因修复：state 增加 loginFrameActive 标志，handleLoginFrameLoad 仅在该标志为真时处理；startLogin/retryInlineLogin 置 true，markLoginDone/cancelLogin/startCollectorLogin 在重置 src 前置 false，杜绝 about:blank 的 onload 覆盖反馈态；
+    ⑤ cancelLogin 改用非 force 刷新，避免额外慢检测。
+    验证：新增 data/verify_login_flow.py 覆盖 fallback 入口、点击即时反馈+失败态、采集器登录调用后端接口、取消关闭；原有 verify_login_modal.py 仍通过；UI 回归 5 项全通过。

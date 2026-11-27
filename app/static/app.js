@@ -10,6 +10,8 @@
     products: [],
     lastResponse: null,
     loginPoll: null,
+    loginChecking: false,
+    loginFrameActive: false,
     page: 1,
     pageSize: 100,
   };
@@ -288,23 +290,43 @@
     }
   }
 
+  function hideAllLoginStates() {
+    ['loginLoading', 'loginFrame', 'loginFallback', 'loginCheckFail', 'loginCollectorWait']
+      .forEach((id) => $(id).classList.add('hidden'));
+  }
+
   function showLoginLoading(message) {
     clearLoginFrameTimer();
+    hideAllLoginStates();
     $('loginLoading').classList.remove('hidden');
-    $('loginFrame').classList.add('hidden');
-    $('loginFallback').classList.add('hidden');
     if (message) $('loginModalMsg').textContent = message;
   }
 
   function showLoginFallback(message) {
     clearLoginFrameTimer();
-    $('loginLoading').classList.add('hidden');
-    $('loginFrame').classList.add('hidden');
+    hideAllLoginStates();
     $('loginFallback').classList.remove('hidden');
-    $('loginModalMsg').textContent = message || '登录页无法在当前页面显示，请在新标签打开';
+    $('loginModalMsg').textContent = message || '登录页无法在当前页面显示';
+  }
+
+  function showLoginCheckFail(message) {
+    clearLoginFrameTimer();
+    hideAllLoginStates();
+    $('loginCheckFail').classList.remove('hidden');
+    $('loginCheckFailMsg').textContent = message || '未检测到采集器登录态';
+    $('loginModalMsg').textContent = message || '未检测到采集器登录态';
+  }
+
+  function showLoginCollectorWait(message) {
+    clearLoginFrameTimer();
+    hideAllLoginStates();
+    $('loginCollectorWait').classList.remove('hidden');
+    $('loginCollectorMsg').textContent = message || '正在打开采集器浏览器窗口，请扫码或账号登录…';
+    $('loginModalMsg').textContent = '采集器浏览器已打开，等待登录完成…';
   }
 
   function handleLoginFrameLoad() {
+    if (!state.loginFrameActive) return;  // 重置为 about:blank 等场景忽略
     clearLoginFrameTimer();
     let hasContent = false;
     try {
@@ -312,10 +334,9 @@
       hasContent = !!doc && !!doc.body && (doc.body.innerText || '').trim().length > 0;
     } catch (err) { hasContent = false; }
     if (hasContent) {
-      $('loginLoading').classList.add('hidden');
-      $('loginFallback').classList.add('hidden');
+      hideAllLoginStates();
       $('loginFrame').classList.remove('hidden');
-      $('loginModalMsg').textContent = '登录页已显示，请在下方完成登录';
+      $('loginModalMsg').textContent = '登录页已显示，请在页面内扫码登录（此方式仅当前浏览器可见，采集需采集器登录）';
     } else {
       showLoginFallback();
     }
@@ -327,6 +348,7 @@
     $('loginModalTitle').textContent = `登录${platform.name}`;
     showLoginLoading('正在加载平台登录页，请稍候…');
     const frame = $('loginFrame');
+    state.loginFrameActive = true;
     frame.onload = handleLoginFrameLoad;
     frame.src = platform.login_url || platform.home_url;
     $('loginModal').classList.remove('hidden');
@@ -338,6 +360,7 @@
   function retryInlineLogin() {
     const platform = state.platformMap[state.selected];
     showLoginLoading('正在重新加载登录页…');
+    state.loginFrameActive = true;
     const frame = $('loginFrame');
     const url = platform.login_url || platform.home_url;
     const sep = url.includes('?') ? '&' : '?';
@@ -346,32 +369,93 @@
   }
 
   async function cancelLogin() {
+    stopLoginPoll();
     clearLoginFrameTimer();
+    state.loginFrameActive = false;
     $('loginFrame').src = 'about:blank';
     $('loginModal').classList.add('hidden');
-    refreshStatus(true);
+    refreshStatus(false);
   }
 
   async function markLoginDone() {
+    if (state.loginChecking) return;
+    state.loginChecking = true;
+    stopLoginPoll();
+    state.loginFrameActive = false;  // 退出 iframe 流程，避免 about:blank 的 onload 覆盖反馈态
     const doneBtn = $('loginDoneBtn');
     const cancelBtn = $('loginCancelBtn');
     doneBtn.disabled = true;
     cancelBtn.disabled = true;
-    $('loginModalMsg').textContent = '正在检测采集器登录态，请稍候（约 30 秒）…';
+    showLoginLoading('正在检测采集器登录态，请稍候…');
+    const checkingText = '正在检测采集器登录态…（首次检测需启动浏览器，约 10~40 秒）';
+    $('loginModalMsg').textContent = checkingText;
+
+    // 前端进度提示 + 超时保护，避免后端慢检测时按钮"无反应"
+    const tips = [
+      '仍在检测中…平台页面加载较慢，请耐心等待',
+      '检测耗时较长，正在等待平台页面响应…',
+      '若长时间无结果，可点击「用采集器浏览器登录」重新登录',
+    ];
+    let tipIdx = 0;
+    const tipTimer = setInterval(() => {
+      if (tipIdx < tips.length) $('loginModalMsg').textContent = tips[tipIdx++];
+    }, 8000);
+    let timeoutTimer = null;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutTimer = setTimeout(() => reject(new Error('检测超时（超过 45 秒）')), 45000);
+    });
+
     try {
-      const status = await refreshStatus(true);
+      const status = await Promise.race([refreshStatus(true), timeoutPromise]);
       $('loginFrame').src = 'about:blank';
       if (status.logged_in) {
         $('loginModal').classList.add('hidden');
-        toast('登录状态已保存', 'success');
+        toast(`${state.platformMap[state.selected].name} 登录状态已保存`, 'success');
       } else {
-        showLoginFallback('未检测到采集器登录态：当前浏览器登录与采集器不互通');
+        showLoginCheckFail('当前浏览器内嵌登录的 Cookie 无法同步给采集器，采集器仍未登录。请用采集器浏览器完成登录。');
       }
     } catch (err) {
-      $('loginModalMsg').textContent = err.message;
+      showLoginCheckFail(`登录态检测失败：${err.message}。请点击「用采集器浏览器登录」重试。`);
     } finally {
+      clearInterval(tipTimer);
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+      state.loginChecking = false;
       doneBtn.disabled = false;
       cancelBtn.disabled = false;
+      doneBtn.textContent = '我已完成登录';
+    }
+  }
+
+  async function startCollectorLogin() {
+    const platform = state.platformMap[state.selected];
+    if (state.loginChecking) return;
+    stopLoginPoll();
+    state.loginFrameActive = false;
+    $('loginFrame').src = 'about:blank';
+    showLoginCollectorWait('正在打开采集器浏览器窗口，请稍候…');
+    try {
+      await api(`/api/platforms/${encodeURIComponent(state.selected)}/login`, { method: 'POST' });
+      $('loginModalMsg').textContent = '采集器浏览器已打开，请在窗口中扫码或账号登录…';
+      // 每 2 秒轮询登录任务，成功后自动关闭弹层并刷新状态
+      state.loginPoll = setInterval(async () => {
+        try {
+          const task = await api(`/api/platforms/${encodeURIComponent(state.selected)}/login-task`);
+          if (task.message) $('loginCollectorMsg').textContent = task.message;
+          if (task.status === 'success') {
+            stopLoginPoll();
+            $('loginModal').classList.add('hidden');
+            toast(`${platform.name} 登录成功，登录态已保存`, 'success');
+            refreshStatus(false);
+          } else if (['failed', 'timeout', 'cancelled'].includes(task.status)) {
+            stopLoginPoll();
+            showLoginCheckFail(task.message || '采集器登录未完成，请重试');
+          }
+        } catch (err) {
+          $('loginCollectorMsg').textContent = err.message;
+        }
+      }, 2000);
+    } catch (err) {
+      showLoginCheckFail(`启动采集器浏览器失败：${err.message}`);
     }
   }
 
@@ -701,6 +785,9 @@
     $('clearLoginBtn').addEventListener('click', clearLogin);
     $('loginCancelBtn').addEventListener('click', cancelLogin);
     $('loginDoneBtn').addEventListener('click', markLoginDone);
+    $('loginCheckRetryBtn').addEventListener('click', markLoginDone);
+    $('loginCollectorBtn').addEventListener('click', startCollectorLogin);
+    $('loginCollectorBtn2').addEventListener('click', startCollectorLogin);
     $('loginOpenTabBtn').addEventListener('click', openLoginInTab);
     $('loginRetryBtn').addEventListener('click', retryInlineLogin);
     $('searchForm').addEventListener('submit', doSearch);
