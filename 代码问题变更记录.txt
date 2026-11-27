@@ -59,3 +59,12 @@
     ④ 根因修复：state 增加 loginFrameActive 标志，handleLoginFrameLoad 仅在该标志为真时处理；startLogin/retryInlineLogin 置 true，markLoginDone/cancelLogin/startCollectorLogin 在重置 src 前置 false，杜绝 about:blank 的 onload 覆盖反馈态；
     ⑤ cancelLogin 改用非 force 刷新，避免额外慢检测。
     验证：新增 data/verify_login_flow.py 覆盖 fallback 入口、点击即时反馈+失败态、采集器登录调用后端接口、取消关闭；原有 verify_login_modal.py 仍通过；UI 回归 5 项全通过。
+
+2026-11-27 11:38 顶栏放大与下拉多选搜索（V-0.0.12）
+17. 问题：顶栏状态 pill 与标题拥挤，用户要求标题/副标题字体放大一倍、状态信息移到最右侧、整体醒目清晰；商品搜索的下拉框需宽度固定但选项按内容显示，店铺类型/品牌/服务特色/优惠类型/发货地要支持多选+模糊实时搜索，选项横铺每行、间隔紧密。
+    修改：
+    ① 顶栏：.topbar 高度 40→52px（.layout 同步 calc(100vh-52px)），logo 26→38px，标题 14→26px、副标题 10→15px；针对 V-0.0.10 的全局左对齐规则追加例外，.topbar 恢复 space-between 且 .top-actions margin-left:auto，状态 pill 靠最右。
+    ② 多选化：config.py 将 shop_type(店铺类型)、promo_type(优惠类型)、ship_from(发货地)、location(发货地) 由 select 改为 multiselect，并去掉各字段的空值"全部/不限"选项；service 标签去掉"（下拉多选）"后缀。build_search_url 将 promo_type/ship_from 逗号多值拆成独立关键词。
+    ③ 模糊搜索：app.js 的 multiselect 面板新增 .ms-search 输入框与 .ms-options/.ms-empty 结构，filterMsOptions() 按 data-label 实时不区分大小写过滤，展开时自动聚焦并清空上次搜索。
+    ④ 横铺布局：.ms-panel 宽度改 max-content（min-width 100%、max-width min(680px,82vw)）按内容自适应，触发器仍固定；.ms-options flex-wrap 横铺，选项 inline-flex/nowrap、间距 2px 4px；搜索框与无匹配提示样式。
+    验证：新增 data/verify_dropdown_search.py 覆盖顶栏右对齐+字号、五字段多选搜索框、模糊过滤（637→1）、无匹配提示与恢复、横铺（首行6项、面板680px>触发器265px）、多选勾选；同步修正 verify_ui_v23.py 对 promo_type/ship_from 的旧断言。因 config.py 变更重启服务后字段类型全部生效；全部回归脚本通过。

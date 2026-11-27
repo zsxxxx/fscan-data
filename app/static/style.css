@@ -22,8 +22,8 @@ body {
 }
 
 .topbar {
-  height: 40px;
-  flex: 0 0 40px;
+  height: 52px;
+  flex: 0 0 52px;
   position: sticky;
   top: 0;
   z-index: 40;
@@ -32,18 +32,18 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 14px;
+  padding: 0 18px;
 }
 
-.brand { display: flex; align-items: center; gap: 8px; }
+.brand { display: flex; align-items: center; gap: 12px; }
 .brand .logo {
-  width: 26px; height: 26px; border-radius: 7px;
+  width: 38px; height: 38px; border-radius: 9px;
   background: var(--primary); color: #fff;
   display: grid; place-items: center;
-  font-weight: 700; letter-spacing: .5px; font-size: 12px;
+  font-weight: 700; letter-spacing: .5px; font-size: 17px;
 }
-.brand h1 { margin: 0; font-size: 14px; font-weight: 650; line-height: 1.1; }
-.brand p { margin: 0; font-size: 10px; color: var(--muted); line-height: 1.1; }
+.brand h1 { margin: 0; font-size: 26px; font-weight: 700; line-height: 1.1; }
+.brand p { margin: 0; font-size: 15px; color: var(--muted); line-height: 1.2; }
 
 .pill {
   display: inline-flex; align-items: center; gap: 6px;
@@ -54,7 +54,7 @@ body {
 .pill.online .dot { background: #16a34a; }
 .pill.offline .dot { background: #dc2626; }
 
-.layout { display: flex; height: calc(100vh - 40px); min-height: 0; }
+.layout { display: flex; height: calc(100vh - 52px); min-height: 0; }
 
 .sidebar {
   width: 118px; flex: 0 0 118px; height: 100%; overflow-y: auto;
@@ -193,18 +193,28 @@ body {
 .ms-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ms-caret { color: var(--muted); margin-left: 6px; flex: none; }
 .ms-panel {
-  display: none; position: absolute; z-index: 30; top: calc(100% + 2px); left: 0; right: 0;
-  max-height: 240px; overflow-y: auto;
+  display: none; position: absolute; z-index: 30; top: calc(100% + 2px); left: 0;
+  width: max-content; min-width: 100%; max-width: min(680px, 82vw);
+  max-height: 300px; overflow-y: auto;
   background: #fff; border: 1px solid var(--border); border-radius: 6px;
-  box-shadow: 0 8px 24px rgba(16, 24, 40, .14); padding: 2px;
+  box-shadow: 0 8px 24px rgba(16, 24, 40, .14); padding: 6px;
 }
 .ms.open .ms-panel { display: block; }
+.ms-search {
+  width: 100%; height: 28px; padding: 0 8px; margin-bottom: 5px;
+  border: 1px solid var(--border); border-radius: 5px;
+  background: #fff; color: var(--text); font-size: 12px; outline: none; box-sizing: border-box;
+}
+.ms-search:focus { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(37, 99, 235, .1); }
+.ms-options { display: flex; flex-wrap: wrap; gap: 2px 4px; }
 .ms-item {
-  display: flex; align-items: center; gap: 5px;
-  padding: 2px 6px; border-radius: 4px; font-size: 12px; line-height: 1.2; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto;
+  padding: 2px 6px; border-radius: 4px; font-size: 12px; line-height: 1.2;
+  white-space: nowrap; cursor: pointer;
 }
 .ms-item:hover { background: #f3f6fb; }
-.ms-item input { width: 15px; height: 15px; margin: 0; cursor: pointer; flex: none; }
+.ms-item input { width: 14px; height: 14px; margin: 0; cursor: pointer; flex: none; }
+.ms-empty { padding: 8px 4px; text-align: center; color: var(--muted); font-size: 12px; }
 
 .result-card { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .message-bar {
@@ -424,3 +434,6 @@ button:disabled { opacity: .6; cursor: not-allowed; }
 .search-head,
 .result-card > .card-head { gap: 14px; }
 .pagination { gap: 14px; }
+/* 顶栏状态 pill 单独靠最右显示 */
+.topbar { justify-content: space-between; }
+.topbar .top-actions { margin-left: auto; }

@@ -88,10 +88,13 @@ class Platform:
         if brand:
             extra_terms.extend(t.strip() for t in str(brand).split(",") if t.strip())
         # 通用附加条件作为关键词补充，避免平台参数差异导致筛选失效
+        # 多选值为逗号分隔，逐项拆成独立关键词
         for key in ("promo_type", "ship_from"):
             value = str(flt.get(key, "")).strip()
-            if value and value not in extra_terms:
-                extra_terms.append(value)
+            for term in value.split(","):
+                term = term.strip()
+                if term and term not in extra_terms:
+                    extra_terms.append(term)
         q = keyword
         if extra_terms:
             q = keyword + "%20" + "%20".join(quote(t, safe="") for t in extra_terms)
@@ -251,12 +254,12 @@ BRAND_OPTIONS = _brand_pairs(
 
 # ---- 五平台通用附加筛选 ----
 COMMON_FILTER_FIELDS = (
-    SearchField("promo_type", "优惠类型", "select", options=(
-        ("", "全部优惠"), ("优惠券", "优惠券"), ("满减", "满减"),
-        ("秒杀", "秒杀"), ("补贴", "补贴"), ("包邮", "包邮"), ("新品", "新品"),
+    SearchField("promo_type", "优惠类型", "multiselect", options=(
+        ("优惠券", "优惠券"), ("满减", "满减"), ("秒杀", "秒杀"),
+        ("补贴", "补贴"), ("包邮", "包邮"), ("新品", "新品"),
     )),
-    SearchField("ship_from", "发货地", "select", options=(
-        ("", "不限发货地"), ("北京", "北京"), ("上海", "上海"), ("广东", "广东"),
+    SearchField("ship_from", "发货地", "multiselect", options=(
+        ("北京", "北京"), ("上海", "上海"), ("广东", "广东"),
         ("浙江", "浙江"), ("江苏", "江苏"), ("福建", "福建"), ("山东", "山东"),
         ("四川", "四川"), ("湖北", "湖北"),
     )),
@@ -408,10 +411,10 @@ PLATFORMS: tuple[Platform, ...] = (
             PRICE_RANGE_FIELD,
             _category_field("商品分类（两级）", TAOBAO_CATEGORY_TREE),
             SearchField("sort", "排序方式", "select", options=SORT_DEFAULT),
-            SearchField("shop_type", "店铺类型", "select", options=(
-                ("", "全部店铺"), ("mall", "天猫"), ("t", "淘宝集市"))),
+            SearchField("shop_type", "店铺类型", "multiselect", options=(
+                ("mall", "天猫"), ("t", "淘宝集市"))),
             SearchField("brand", "品牌", "multiselect", options=BRAND_OPTIONS),
-            SearchField("service", "服务特色（下拉多选）", "multiselect", options=(
+            SearchField("service", "服务特色", "multiselect", options=(
                 ("包邮", "包邮"), ("天猫", "天猫"), ("新品", "新品"), ("二手", "二手"), ("同城", "同城"))),
         ),
         url_params={"sort": "sort", "shop_type": "tab"},
@@ -442,7 +445,7 @@ PLATFORMS: tuple[Platform, ...] = (
             SearchField("channel", "配送 / 店铺", "select", options=(
                 ("", "全部"), ("self", "京东自营"), ("logistics", "京东物流"))),
             SearchField("brand", "品牌", "multiselect", options=BRAND_OPTIONS),
-            SearchField("service", "服务特色（下拉多选）", "multiselect", options=(
+            SearchField("service", "服务特色", "multiselect", options=(
                 ("自营", "自营"), ("京东物流", "京东物流"), ("新品", "新品"),
                 ("秒杀", "秒杀"), ("优惠券", "优惠券"), ("试用", "试用"))),
         ),
@@ -470,8 +473,8 @@ PLATFORMS: tuple[Platform, ...] = (
             SearchField("sort", "排序方式", "select", options=SORT_DEFAULT),
             SearchField("subsidy", "活动类型", "select", options=(
                 ("", "全部"), ("100yi", "百亿补贴"), ("brand", "品牌好货"))),
-            SearchField("location", "发货地", "select", options=(
-                ("", "不限"), ("浙江", "浙江"), ("广东", "广东"), ("江苏", "江苏"),
+            SearchField("location", "发货地", "multiselect", options=(
+                ("浙江", "浙江"), ("广东", "广东"), ("江苏", "江苏"),
                 ("山东", "山东"), ("福建", "福建"), ("上海", "上海"), ("北京", "北京"))),
             SearchField("brand", "品牌", "multiselect", options=BRAND_OPTIONS),
         ),

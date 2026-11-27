@@ -79,6 +79,19 @@
     });
   }
 
+  function filterMsOptions(ms, query) {
+    const items = Array.from(ms.querySelectorAll('.ms-item'));
+    let visible = 0;
+    items.forEach((item) => {
+      const label = item.dataset.label || item.textContent.toLowerCase();
+      const match = !query || label.indexOf(query) >= 0;
+      item.classList.toggle('hidden', !match);
+      if (match) visible++;
+    });
+    const emptyTip = ms.querySelector('.ms-empty');
+    if (emptyTip) emptyTip.classList.toggle('hidden', visible > 0);
+  }
+
   function renderPlatformFields(platform) {
     const container = $('platformFields');
     const fields = platform.search_fields || [];
@@ -100,15 +113,19 @@
         </div></div>`;
       }
 
-      // 下拉多选：点击展开勾选面板，全部选择式
+      // 下拉多选：固定宽度触发器 + 按内容自适应的横铺勾选面板 + 实时模糊搜索
       if (f.type === 'multiselect') {
         const items = (f.options || []).map((o) =>
-          `<label class="ms-item"><input type="checkbox" value="${escapeHtml(o.value)}"><span>${escapeHtml(o.label)}</span></label>`
+          `<label class="ms-item" data-label="${escapeHtml(o.label.toLowerCase())}"><input type="checkbox" value="${escapeHtml(o.value)}"><span>${escapeHtml(o.label)}</span></label>`
         ).join('');
         return `<div class="field"><span>${label}</span>
           <div class="ms" data-filter="${key}">
             <button type="button" class="ms-trigger"><span class="ms-text">不限</span><span class="ms-caret">▾</span></button>
-            <div class="ms-panel">${items}</div>
+            <div class="ms-panel">
+              <input type="text" class="ms-search" placeholder="搜索筛选…" autocomplete="off">
+              <div class="ms-options">${items}</div>
+              <div class="ms-empty hidden">无匹配项</div>
+            </div>
           </div></div>`;
       }
 
@@ -160,15 +177,20 @@
       fill();
     });
 
-    // 下拉多选：展开/收起、勾选回显、点击外部关闭
+    // 下拉多选：展开/收起、勾选回显、实时模糊搜索、点击外部关闭
     container.querySelectorAll('.ms').forEach((ms) => {
       const trigger = ms.querySelector('.ms-trigger');
       const text = ms.querySelector('.ms-text');
+      const search = ms.querySelector('.ms-search');
+      const emptyTip = ms.querySelector('.ms-empty');
       trigger.addEventListener('click', (e) => {
         e.stopPropagation();
         const willOpen = !ms.classList.contains('open');
         container.querySelectorAll('.ms.open').forEach((x) => x.classList.remove('open'));
-        if (willOpen) ms.classList.add('open');
+        if (willOpen) {
+          ms.classList.add('open');
+          if (search) { search.value = ''; filterMsOptions(ms, ''); search.focus(); }
+        }
       });
       ms.querySelectorAll('input[type=checkbox]').forEach((cb) => {
         cb.addEventListener('change', () => {
@@ -176,6 +198,11 @@
           text.textContent = selected.length ? `已选 ${selected.length} 项` : '不限';
         });
       });
+      // 实时模糊搜索：按选项文字过滤，大小写不敏感
+      if (search) {
+        search.addEventListener('input', () => filterMsOptions(ms, search.value.trim().toLowerCase()));
+        search.addEventListener('click', (e) => e.stopPropagation());
+      }
       ms.addEventListener('click', (e) => e.stopPropagation());
     });
     document.addEventListener('click', () => {
