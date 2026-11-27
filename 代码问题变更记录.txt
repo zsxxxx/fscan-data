@@ -45,3 +45,7 @@
 2026-11-27 11:05 界面二次紧凑
 14. 问题：侧栏仍偏宽、顶部标题栏过高、平台行/搜索行的上方空白间隔过宽、商品搜索下拉多选的选项间距过大，用户要求全部压到最小。
     修改：① 侧栏 150→118px，padding/font/gap 同步收紧（side-title 10px、platform-item padding 6px/gap 5px/字号 12px）；② 顶栏 64→40px（logo 36→26px、标题 17→14px、副标题 12→10px），.layout 高度同步改为 calc(100vh - 40px)；③ 内容区 padding 16/24/20→8/12/10、内容间距 12→4px，#searchView gap 6→3px，三卡 padding 4px→2px；④ 下拉面板 .ms-panel padding 6→2px、.ms-item padding 6px/8px→2px/6px、gap 8→5px、字号 13→12px、行高 1.2。实测顶栏 40px、侧栏 118px、平台行 28.4px、搜索行 26px、下拉单选项 19px，侧栏文字无溢出。UI 回归脚本（含分页）全部通过。
+
+2026-11-27 11:10 按钮与状态信息左对齐
+15. 问题：顶部各行（顶栏状态、平台登录按钮组、搜索行提示、数据列表头按钮、分页控件）原为 space-between 两端分布，用户要求所有按钮与状态显示信息左对齐、依次展示。
+    修改：style.css 末尾新增覆盖规则，将 .topbar / .platform-row / .card-head / .pagination 的 justify-content 由 space-between 改为 flex-start，并设置各行 gap（顶栏 10px、平台行 12px、搜索/数据头/分页 14px）。实测平台行元素 x 坐标 145→242→314→398→482 依次靠左排列，截图无重叠；UI 回归脚本（含分页）全部通过。

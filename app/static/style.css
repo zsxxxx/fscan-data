@@ -413,3 +413,14 @@ button:disabled { opacity: .6; cursor: not-allowed; }
 .page-btn:hover:not(:disabled) { background: #f3f6fb; border-color: var(--primary); color: var(--primary); }
 .page-btn:disabled { opacity: .45; cursor: not-allowed; }
 .page-num { min-width: 62px; text-align: center; color: var(--text); }
+
+/* ===== 所有按钮与状态显示信息左对齐、依次展示 ===== */
+.topbar,
+.platform-row,
+.card-head,
+.pagination { justify-content: flex-start; }
+.topbar .top-actions { gap: 10px; }
+.platform-row { gap: 12px; }
+.search-head,
+.result-card > .card-head { gap: 14px; }
+.pagination { gap: 14px; }
